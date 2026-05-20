@@ -1,12 +1,12 @@
 import random
 from collections import defaultdict, Counter
 from dataclasses import dataclass
-from math import sqrt
+
 from typing import Dict, Any
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-from scipy import stats
+
 
 
 from Agent import Agent
@@ -376,7 +376,7 @@ class GenerationSimulation:
         for year in range(1950, 2126):
             self.year = year
 
-            # ✅ Вариант Б: Обнуляем накопленную генетическую статистику Менделя
+            # Вариант Б: Обнуляем накопленную генетическую статистику Менделя
             # ровно в год старта анализируемого периода симуляции
             if self.year == self.simulation_start_year:
                 self.inheritance_stats.combo_children_genotypes.clear()
@@ -847,7 +847,7 @@ class GenerationSimulation:
 
         # 1. Целевые показатели
         actual_tfr = self.calculate_actual_fertility_rate()
-        print(f"\n{'=' * 20} ОТЧЕТ ПО РОЖДАЕМОСТИ ({self.year}) {'=' * 20}")
+        print(f"\n{'=' * 20} Отчет по рождаемости ({self.year}) {'=' * 20}")
         print(f"Целевой TFR (исторический): {self.target_fertility_rate:.2f}")
         print(f"Фактический TFR модели:     {actual_tfr:.2f}")
         print(f"Отклонение калибровки:      {(actual_tfr - self.target_fertility_rate):+.2f}")
@@ -918,7 +918,7 @@ class GenerationSimulation:
         # 7. Итоговые показатели семьи
         families = len(self.family_children_count)
         avg_children = self.children_born / families if families > 0 else 0
-        print(f"\n📈 Итоги симуляции к {self.year} году:")
+        print(f"\n Итоги симуляции к {self.year} году:")
         print(f"  Всего рождений:                {self.children_born}")
         print(f"  Среднее число детей на семью:  {avg_children:.2f}")
         print("=" * 60 + "\n")
@@ -1069,8 +1069,6 @@ class GenerationSimulation:
         father.add_child(child_id)
         mother.add_child(child_id)
 
-        # ✅ ИСПРАВЛЕНО: Строка со старым вызовом статистики удалена.
-        # Теперь ПГТ-фильтры больше не ломают чистоту верификации законов Менделя.
 
         return child
 
@@ -1417,7 +1415,7 @@ class GenerationSimulation:
 
         print("\n" + "═" * 80)
         scenario_label = "Modernization (Scenario 2)" if self.params.use_screening else "Status Quo (Scenario 1)"
-        print(f"{f'📊 ОТЧЕТ О ВАЛИДАЦИИ: {scenario_label}':^80}")
+        print(f"{f'Отчет по валидации: {scenario_label}':^80}")
         print(f"{'(Период исторической калибровки: 1950-2024)':^80}")
         print("═" * 80)
 
@@ -1433,8 +1431,8 @@ class GenerationSimulation:
             if row['year'] == 1950: return '⏺ Старт'
             # Допуск в 3.0 пункта — хороший стандарт для стохастических моделей
             if row['br_error'] < 3.0 and row['dr_error'] < 2.0:
-                return '✅ Точно'
-            return '⚠️ Шум'
+                return ' Точно'
+            return ' Шум'
 
         df_check['Статус'] = df_check.apply(evaluate_fit, axis=1)
 
@@ -1463,11 +1461,11 @@ class GenerationSimulation:
             mape_br = np.mean(np.abs((stable_df['model_birth_rate'] - stable_df['target_birth_rate']) / stable_df[
                 'target_birth_rate'])) * 100
 
-            print(f"📈 СТАТИСТИЧЕСКАЯ ТОЧНОСТЬ (1980-2024):")
+            print(f"Статистическая точность (1980-2024):")
             print(f"   Рождаемость (RMSE): {rmse_br:.2f} (MAPE: {mape_br:.1f}%)")
             print(f"   Смертность (MAE):   {mae_dr:.2f}")
 
-            verdict = "✅ ВЫСОКАЯ" if rmse_br < 2.5 else ("🆗 ПРИЕМЛЕМАЯ" if rmse_br < 4.5 else "⚠️ НИЗКАЯ")
+            verdict = "Высокая" if rmse_br < 2.5 else ("Приемлимая" if rmse_br < 4.5 else "Низкая")
             print(f"   Адекватность модели: {verdict}")
 
         # 3. Динамика популяции
@@ -1475,10 +1473,10 @@ class GenerationSimulation:
         final_pop = df['model_population'].iloc[-1]
         growth = (final_pop / initial_pop - 1) * 100
 
-        print(f"\n ИТОГИ ДЕМОГРАФИИ:")
+        print(f"\n Итоги дефографии:")
         print(f"   Население (1950): {int(initial_pop):>7} чел.")
         print(f"   Население (2024): {int(final_pop):>7} чел.")
-        print(f"   Общее изменение:  {growth:+.1f}% {'📈' if growth > 0 else '📉'}")
+        print(f"   Общее изменение:  {growth:+.1f}% {'' if growth > 0 else ''}")
         print("═" * 80)
 
     def _print_age_structure(self):
@@ -1494,7 +1492,7 @@ class GenerationSimulation:
         n = len(living_agents)
 
         print(f"\n{'=' * 65}")
-        print(f" ВОЗРАСТНАЯ СТРУКТУРА И ДОЖИВАЕМОСТЬ (Год: {self.year})")
+        print(f" Возростная структура и доживаемость (Год: {self.year})")
         print(f"{'=' * 65}")
 
         # Сравнительная статистика (Больные vs Здоровые)
@@ -1535,10 +1533,10 @@ class GenerationSimulation:
         print('=' * 65)
 
     def _print_final_summary(self):
-        """Генерирует финальный аналитический отчет для защиты Master's Thesis"""
+
         print("\n" + "═" * 90)
         scenario_label = "Modernization (Scenario 2)" if self.params.use_screening else "Status Quo (Scenario 1)"
-        print(f" {f'ФИНАЛЬНЫЙ НАУЧНЫЙ ОТЧЕТ: {scenario_label}':^88}")
+        print(f" {f'Финальный отчет: {scenario_label}':^88}")
         print(f" {f'Период моделирования: 1950 - {self.year}':^88}")
         print("═" * 90)
 
@@ -1555,7 +1553,7 @@ class GenerationSimulation:
         arm_alive = sum(1 for a in alive_agents if a.ethnicity == 'Armenian')
         others = [a for a in alive_agents if a.ethnicity != 'Armenian']
 
-        print(f" 🧬 ДЕМОГРАФИЧЕСКАЯ ВАЛИДАЦИЯ:")
+        print(f" Демографическая валидация:")
         print(f"  ▪ Живое население:       {n_alive:,} чел.")
         print(f"  ▪ Доля титульной группы: {arm_alive / n_alive * 100:.1f}% (Армяне)")
 
@@ -1565,7 +1563,7 @@ class GenerationSimulation:
             print(f"  ▪ Генетический дрейф:    {other_carriers / len(others) * 100:.2f}% носителей в группе 'Other'")
 
         # 2. МЕДИЦИНСКИЙ КИПИ (Интервенция)
-        print(f"\n 🏥 МЕДИЦИНСКАЯ ЭФФЕКТИВНОСТЬ:")
+        print(f"\n Медицинская эффективность:")
         if self.params.use_screening:
             screened_count = sum(1 for a in alive_agents if a.is_screened)
             print(f"  ▪ Охват скринингом:      {screened_count / n_alive * 100:.1f}% населения")
@@ -1579,7 +1577,7 @@ class GenerationSimulation:
         n_aff = len(all_affected)
 
         if n_aff > 0:
-            print(f"\n 📊 ГЕНЕТИЧЕСКИЙ ЛАНДШАФТ (Сравнение с литературой):")
+            print(f"\n Генетический ландшафт  (Сравнение с литературой):")
             print(f"{'-' * 90}")
             print(f"{'Тип мутации (FMF)':<25} | {'Модель % (95% CI)':<22} | {'Эталон %':<10} | {'Статус'}")
             print(f"{'-' * 90}")
@@ -1608,7 +1606,7 @@ class GenerationSimulation:
                 print(f"{mtype:<25} | {pct:>6.2f}% ± {ci:>5.2f}% | {target:>8.2f}% | {status}")
 
         # 4. ИТОГОВЫЙ ДЕМОГРАФИЧЕСКИЙ КОНТРОЛЬ
-        print(f"\n 📈 ИТОГОВЫЕ ДЕМОГРАФИЧЕСКИЕ ПОКАЗАТЕЛИ:")
+        print(f"\n Итоговые демографические показатели:")
         actual_tfr = self.calculate_actual_fertility_rate()
         print(f"  ▪ Завершенная фертильность (TFR): {actual_tfr:.2f}")
 
@@ -1668,7 +1666,7 @@ class GenerationSimulation:
         n_total = analysis.get('n_armenian', analysis['total_living'])
 
         print("\n" + "═" * 75)
-        print(f"🧬 ГЕНЕТИЧЕСКИЙ МОНИТОРИНГ (Год {analysis['year']})")
+        print(f" Генетический мониторинг (Год {analysis['year']})")
         print(f"   Размер выборки (Армяне): {n_total:,} чел. ({n_total * 2:,} аллелей)")
         print("═" * 75)
         print(f"{'Аллель':<10} | {'Старт':<10} | {'Сейчас':<10} | {'Дрейф':<10} | {'Статус'}")
@@ -1730,9 +1728,6 @@ class GenerationSimulation:
         print(f"{'Тип мутации':<25} | {'Модель %':>12} | {'Цель %':>8} | {'Статус':>8}")
         print(f"{'-' * 75}")
 
-        if total_sick < 10:
-            print(f"⚠️ Слишком малая выборка для валидации (n={total_sick}).")
-            return
 
         for m_type, target_val in targets.items():
             count = sum(1 for a in sick_agents if a.mutation_type == m_type)
@@ -1766,7 +1761,7 @@ class GenerationSimulation:
 
     def _print_detailed_inheritance_stats(self):
         print(f"\n{'=' * 70}")
-        print(f" ДЕТАЛЬНАЯ СТАТИСТИКА НАСЛЕДОВАНИЯ (ПОКОЛЕНИЯ 1+)")
+        print(f" Подробная статистика наследования")
         print(f"{'=' * 70}")
 
         # 1. Локальный срез агентов текущей симуляции (исключаем Поколение 0)
@@ -1925,9 +1920,9 @@ class GenerationSimulation:
                                   'ratios': {'healthy': 0.0, 'carrier': 0.0, 'affected': 1.0}},
         }
 
-        print(f"\n ВЕРИФИКАЦИЯ ЗАКОНОВ МЕНДЕЛЯ (Чистая биология на момент зачатия):")
+        print(f"\n Верификация:")
         print(
-            f"{' ТИП СКРЕЩИВАНИЯ (Объем n)':<40} | {'СТАТУС':<10} | {'КОЛ-ВО':<7} | {'ТЕОРИЯ':<8} | {'ПРИРОДА':<8} | {'ОТКЛОН.'}")
+            f"{' Тип скрещевания (Объем n)':<40} | {'СТАТУС':<10} | {'КОЛ-ВО':<7} | {'ТЕОРИЯ':<8} | {'ПРИРОДА':<8} | {'ОТКЛОН.'}")
         print("═" * 96)
 
         def _get_abbr(s):
@@ -1941,7 +1936,7 @@ class GenerationSimulation:
             total_children = sum(actual_results.values())
 
             if total_children == 0:
-                print(f"{title:<40} | {'НЕТ ДАННЫХ (зачатий не происходило)':<52}")
+                print(f"{title:<40} | {'зачатий не происходило':<52}")
                 print("-" * 96)
                 continue
 
@@ -2153,11 +2148,11 @@ class GenerationSimulation:
         Включает статистику по принятым решениям, успешности и генотипам детей.
         """
         print("\n" + "═" * 96)
-        print(" 🧬 ДЕТАЛЬНЫЙ ОТЧЕТ ПО PGT (ПРЕИМПЛАНТАЦИОННАЯ ГЕНЕТИЧЕСКАЯ ДИАГНОСТИКА)")
+        print(" Детальный отчет по PGT")
         print("═" * 96)
 
         # 1. БАЗОВАЯ СТАТИСТИКА ИСПОЛЬЗОВАНИЯ
-        print(f"\n📊 1. СТАТИСТИКА ИСПОЛЬЗОВАНИЯ PGT:")
+        print(f"\n1. Статистика использования PGT:")
         print(f"   {'Показатель':<45} | {'Значение'}")
         print(f"   {'-' * 45}-+-{'-' * 20}")
         print(f"   {'Год начала применения PGT':<45} | {self.pgt_start_year}")
@@ -2194,7 +2189,7 @@ class GenerationSimulation:
                             natural_high_risk_children.append(agent)
 
         # 2. АНАЛИЗ ГЕНОТИПОВ ДЕТЕЙ ИЗ ГРУППЫ РИСКА
-        print(f"\n👶 2. АНАЛИЗ ДЕТЕЙ ОТ ПАР С ВЫСОКИМ РИСКОМ (период анализа, n={len(all_high_risk_children)}):")
+        print(f"\n 2. Анализ пар с высоким риском (период анализа, n={len(all_high_risk_children)}):")
         if all_high_risk_children:
             total = len(all_high_risk_children)
 
@@ -2211,7 +2206,7 @@ class GenerationSimulation:
             print(f"   {'M/M (больной)':<15} | {a_count:<12} | {a_pct:>6.1f}%   | {'Развитие FMF':<20}")
 
             # Реальное сопоставление отклонений со знаком
-            print(f"\n   📊 Сравнение суммарного распределения с законами Менделя (Эффект медицины):")
+            print(f"\n  Сравнение суммарного распределения с законами Менделя:")
             print(f"   {'Генотип':<15} | {'Факт %':<10} | {'Теория %':<12} | {'Сдвиг популяции'}")
             print(f"   {'-' * 15}-+-{'-' * 10}-+-{'-' * 12}-+-{'-' * 15}")
             print(f"   {'N/N':<15} | {h_pct:>6.1f}%   | {25.0:>6.1f}%      | {h_pct - 25.0:>+6.1f}% (Рост нормы)")
@@ -2227,7 +2222,7 @@ class GenerationSimulation:
             if prevented_cases < 0:
                 prevented_cases = 0
 
-            print(f"\n   🎯 ЭФФЕКТИВНОСТЬ ПРЕДОТВРАЩЕНИЯ ЗАБОЛЕВАЕМОСТИ:")
+            print(f"\n   Эффективность предотвращения заболевания:")
             print(f"      Ожидалось больных по Менделю (без ВРТ): {expected_affected_total}")
             print(f"      Фактически родилось с мутацией M/M:    {a_count}")
             print(f"      Предотвращено случаев тяжелого FMF:     {prevented_cases}")
@@ -2238,11 +2233,11 @@ class GenerationSimulation:
             else:
                 print(f"      Коэффициент снижения бремени болезни:   0.0%")
         else:
-            print("   ⚠️ Нет данных по детям из группы высокого риска.")
+            print("   Нет данных по детям из группы высокого риска.")
             prevented_cases = 0
 
         # 3. АНАЛИЗ ПО ДЕСЯТИЛЕТИЯМ (динамика эффективности)
-        print(f"\n📈 3. ДИНАМИКА PGT-РОЖДЕНИЙ ПО ДЕСЯТИЛЕТИЯМ:")
+        print(f"\n3. Динамика PGT-рождений по десятилетиям:")
         print(f"   {'Годы':<12} | {'Рождения PGT':<14} | {'Доля от группы риска':<22} | {'Предотвращено FMF (прибл.)'}")
         print(f"   {'-' * 12}-+-{'-' * 14}-+-{'-' * 22}-+-{'-' * 26}")
 
@@ -2259,8 +2254,8 @@ class GenerationSimulation:
             print(f"   {dec}-{dec + 9:<8} | {dec_pgt:<14} | {share:>20.1f}% | ~{dec_prevented_est:<23.1f}")
 
         # 4. СРАВНЕНИЕ СЦЕНАРИЕВ
-        print(f"\n🔄 4. СРАВНИТЕЛЬНЫЙ АНАЛИЗ (Естественный цикл vs Модифицированный PGT):")
-        print(f"   📊 За анализируемый период:")
+        print(f"\n 4. Сравнительный анализ:")
+        print(f"   За анализируемый период:")
         print(f"      Естественные роды в группе риска (Отказ/Вне скрининга) : {len(natural_high_risk_children)} детей")
 
         nat_affected = sum(1 for c in natural_high_risk_children if c.mefv_allele_1 != 'N' and c.mefv_allele_2 != 'N')
@@ -2277,24 +2272,24 @@ class GenerationSimulation:
         print(f"      Глобальный кумулятивный счетчик предотвращенных FMF      : {prevented_cases} случаев")
 
         # 5. РЕКОМЕНДАЦИИ ПО УЛУЧШЕНИЮ
-        print(f"\n💡 5. АНАЛИЗ ЭФФЕКТИВНОСТИ И РЕКОМЕНДАЦИИ:")
-        if self.pgt_attempts > 0:
-            real_efficiency = self.pgt_births / self.pgt_attempts * 100
-            print(f"   ✅ Доступность репродуктивных технологий ВРТ: {real_efficiency:.1f}% успешных исходов на цикл.")
-            if self.pgt_eligible_but_declined > 0:
-                print(
-                    f"   📌 Выявлен резерв: {self.pgt_eligible_but_declined} пар высокого риска не смогли/отказались делать ЭКО.")
-                print(f"      Рекомендация: Расширить гос. субсидирование (квоты) для повышения комплаентности.")
+        # print(f"\n 5. Анализ эффективности и рекомендаций:")
+        # if self.pgt_attempts > 0:
+        #     real_efficiency = self.pgt_births / self.pgt_attempts * 100
+        #     print(f"   Доступность репродуктивных технологий: {real_efficiency:.1f}% успешных исходов на цикл.")
+        #     if self.pgt_eligible_but_declined > 0:
+        #         print(
+        #             f"    Выявлен резерв: {self.pgt_eligible_but_declined} пар высокого риска не смогли/отказались делать ЭКО.")
+        #         print(f"      Рекомендация: Расширить гос. субсидирование (квоты) для повышения комплаентности.")
 
         print("\n" + "═" * 96)
 
     def print_screening_report(self):
         """Отчет по эффективности скрининга и PGT"""
         print("\n" + "═" * 75)
-        print(" 📋 СВОДНЫЙ ОТЧЕТ ПО ЭФФЕКТИВНОСТИ СКРИНИНГА И ИНТЕРВЕНЦИЙ")
+        print(" Сводный отчет по эффективности скрининга и интервенций")
         print("═" * 75)
 
-        print(f"\n📊 СТАТИСТИКА ГЕНЕТИЧЕСКОГО СКРИНИНГА:")
+        print(f"\nстатистика генетического скрининга:")
         print(f"  Год развертывания программы     : {self.screening_start_year}")
         print(f"  Установленный охват населения   : {self.params.screening_coverage * 100:.1f}%")
         print(f"  Комплаентность консультирования : {self.params.screening_efficiency * 100:.1f}%")
@@ -2327,11 +2322,11 @@ class GenerationSimulation:
         else:
             prevented_cases = 0
 
-        print(f"\n🛡️ КЛИНИЧЕСКИЙ ЭФФЕКТ ПРОГРАММЫ:")
+        print(f"\n Клинический эффект программы:")
         print(f"  Всего предотвращено рождений детей с тяжелым течением FMF: {prevented_cases} случаев")
 
         if self.pgt_attempts > 0 or self.pgt_births > 0:
-            print(f"\n🧬 ДЕМОГРАФИЯ СЛУЖБЫ ВРТ + ПГТ:")
+            print(f"\n Демография службы ВРТ + ПГТ:")
             print(f"  Зарегистрировано попыток ЭКО+ПГТ : {self.pgt_attempts}")
             print(f"  Завершились рождением ребенка    : {self.pgt_births}")
             if self.pgt_attempts > 0:
