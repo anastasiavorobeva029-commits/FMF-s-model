@@ -18,9 +18,9 @@ class ModelParams:
     systemic_diagnosis_start_year: int = 1990
     screening_start_year: int = 2010
     pgt_start_year: int = 2018
-    num_runs: int = 2
+    num_runs: int = 30
     max_age_limit: int = 85
-    initial_population_size: int = 10_000
+    initial_population_size: int = 50_000
     diagnosis_slope: float = 0.012350
     diagnosis_intercept: float = -24.52535
     diagnosis_min_prob: float = 0.05
@@ -57,7 +57,7 @@ class ModelParams:
         return ModelParams(ethnic_assortativity=0.55, do_diagnosing=True, use_screening=True,
                            screening_coverage=0.8, screening_efficiency=0.8, fertility_recovery=1.0,
                            ethnic_distribution={'Armenian': 0.65, 'Other': 0.35},
-                           use_pgt=True, pgt_efficiency=0.6)
+                           use_pgt=True, pgt_efficiency=0.5)
 
 
     def get_bio_access_chance(self):
