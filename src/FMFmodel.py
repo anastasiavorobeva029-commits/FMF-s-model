@@ -440,7 +440,7 @@ def run_multiple_simulations(params: ModelParams,
         # Обработка результатов по мере готовности
         iterator = as_completed(future_to_run)
         if show_progress:
-            iterator = tqdm(iterator, total=params.num_runs, desc="🧬 Monte Carlo Ensemble", unit="sim")
+            iterator = tqdm(iterator, total=params.num_runs, desc=" Monte Carlo Ensemble", unit="sim")
 
         for future in iterator:
 
@@ -505,7 +505,7 @@ def run_model(model_params: ModelParams):
     # =========================================================================
 
     console.print(f"\n{'=' * 70}", style="bold blue")
-    console.print(f" 🧬 ЧАСТЬ 1: Симуляции ({model_params.num_runs} прогонов)", style="bold blue")
+    console.print(f"  ЧАСТЬ 1: Симуляции ({model_params.num_runs} прогонов)", style="bold blue")
     console.print(f" {'=' * 70}", style="bold blue")
 
     # Запуск множественных прогонов
