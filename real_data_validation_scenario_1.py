@@ -13,7 +13,6 @@ from scipy.stats import linregress
 def clear_results_folder(base_folder, force_clear=True):
     """Очищает папку с результатами перед записью новых данных"""
     if force_clear and os.path.exists(base_folder):
-        print(f"🗑️ Очищаем существующую папку: {base_folder}")
         shutil.rmtree(base_folder)
         time.sleep(0.5)  # Небольшая пауза для гарантии удаления
     os.makedirs(base_folder, exist_ok=True)
