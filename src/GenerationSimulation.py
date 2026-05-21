@@ -199,6 +199,10 @@ class GenerationSimulation:
         df = pd.DataFrame(data)
         total_pop = len(df)
 
+        if total_pop == 0:
+            print("В популяции нет живых агентов!")
+            return
+
         # 2. Общая демография
         eth_dist = df['ethnicity'].value_counts(normalize=True) * 100
         print(f"Распределение этносов: Armenian {eth_dist.get('Armenian', 0):.1f}%, "
@@ -207,23 +211,32 @@ class GenerationSimulation:
         # 3. Генетическая статистика
         affected_count = df['is_affected'].sum()
         carriers_count = df['is_carrier'].sum()
-        diagnosed_count = df['is_diagnosed'].sum()
-        resistant_count = df['is_colchicine_resistant'].sum()
-        on_antibodies_count = df['on_antibodies'].sum()
 
         print(f"Больных (FMF MM): {affected_count} ({affected_count / total_pop * 100:.2f}%)")
-        print(
-            f"Из них с диагнозом: {diagnosed_count} ({diagnosed_count / affected_count * 100 if affected_count > 0 else 0:.1f}%)")
-        print(f"Носителей (MN): {carriers_count} ({carriers_count / total_pop * 100:.1f}%)")
 
+        # Считаем клинические статусы СТРОГО среди больных (is_affected == True)
         if affected_count > 0:
+            df_affected = df[df['is_affected']]
+            diagnosed_count = df_affected['is_diagnosed'].sum()
+            resistant_count = df_affected['is_colchicine_resistant'].sum()
+            on_antibodies_count = df_affected['on_antibodies'].sum()
+
+            print(f"Из них с диагнозом: {diagnosed_count} ({diagnosed_count / affected_count * 100:.1f}%)")
+            print(f"Носителей (MN): {carriers_count} ({carriers_count / total_pop * 100:.1f}%)")
             print(
                 f"Резистентных к колхицину: {resistant_count} ({resistant_count / affected_count * 100:.1f}% от больных)")
-            print(
-                f"Получают биопрепараты (антитела): {on_antibodies_count} ({on_antibodies_count / resistant_count * 100 if resistant_count > 0 else 0:.1f}% от резистентных)")
 
+            # Получение биопрепаратов считаем от числа резистентных
+            p_antibodies = (on_antibodies_count / resistant_count * 100) if resistant_count > 0 else 0.0
+            print(f"Получают биопрепараты (антитела): {on_antibodies_count} ({p_antibodies:.1f}% от резистентных)")
+        else:
+            print(f"Из них с диагнозом: 0 (0.0%)")
+            print(f"Носителей (MN): {carriers_count} ({carriers_count / total_pop * 100:.1f}%)")
+            print(f"Резистентных к колхицину: 0 (0.0% от больных)")
+            print(f"Получают биопрепараты (антитела): 0 (0.0% от резистентных)")
+
+        # Статистика PGT
         if self.pgt_attempts > 0 or self.pgt_births > 0:
-            # Краткая статистика - только основные цифры
             print(f"\nСтатистика PGT (преимплантационная генетическая диагностика):")
             print(f"  Попыток использования PGT: {self.pgt_attempts}")
             print(f"  Успешных родов через PGT: {self.pgt_births}")
@@ -234,7 +247,6 @@ class GenerationSimulation:
         # 4. Статистика для сценариев
         print("-" * 30)
         if self.params.use_screening:
-            # Различаем Сценарий 2 и Сценарий 3
             if self.params.use_pgt and self.params.screening_coverage >= 0.8:
                 print(f"Сценарий 3: Снижение ассортативности + Массовый скрининг + PGT (Текущий год: {self.year})")
                 print(f"Ассортативность: {self.params.ethnic_assortativity}")
@@ -247,6 +259,7 @@ class GenerationSimulation:
                 print(f"Охват скринингом: {self.params.screening_coverage * 100:.0f}%")
             else:
                 print(f"Сценарий 2: Интервенция (скрининг) (Текущий год: {self.year})")
+
             print(f"Предотвращено рождений FMF: {self.prevented_fmf_births}")
             screened_count = df['is_screened'].sum()
             print(f"Охвачено скринингом: {screened_count} чел. ({screened_count / total_pop * 100:.1f}%)")
@@ -687,13 +700,26 @@ class GenerationSimulation:
                     self._fertility_map[age] = fertility_value
 
     def _get_fertility_factor(self, age: int, agent: Agent = None) -> float:
-        """Учитывает возраст и, если передан агент, его состояние здоровья"""
-        if 18 <= age <= 45:
+        """Учитывает возрастную структуру и влияние FMF на репродуктивную функцию"""
+
+        # 1. Расширяем до 15-49 лет, если это соответствует вашему csv (age_fertility_dist)
+        if 15 <= age <= 49:
             base_factor = self._fertility_map[age]
 
-            #  учитываем fertility_recovery для больных женщин
-            if agent and agent.gender == 'female' and agent.clinical_status == 'symptomatic':
-                base_factor *= self.params.fertility_recovery
+            if agent and agent.gender == 'female':
+                # Если женщина больна (гомозигота MM)
+                has_mutation1 = agent.mefv_allele_1 != 'N'
+                has_mutation2 = agent.mefv_allele_2 != 'N'
+
+                if has_mutation1 and has_mutation2:
+                    # Если у нее активные симптомы И она НЕ лечится
+                    if agent.clinical_status == 'symptomatic' and not agent.on_colchicine:
+                        base_factor *= self.params.fertility_recovery  # Сильное снижение
+
+                    # Если она на колхицине, фертильность выше, но, возможно, чуть ниже нормы (опционально)
+                    elif agent.on_colchicine:
+                        # Можно оставить 1.0 (полное восстановление) или умножить на коэф. вроде 0.95
+                        pass
 
             return base_factor
         return 0.0

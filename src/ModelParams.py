@@ -20,7 +20,7 @@ class ModelParams:
     pgt_start_year: int = 2018
     num_runs: int = 2
     max_age_limit: int = 85
-    initial_population_size: int = 1_000
+    initial_population_size: int = 15_000
     diagnosis_slope: float = 0.012350
     diagnosis_intercept: float = -24.52535
     diagnosis_min_prob: float = 0.05
@@ -46,18 +46,33 @@ class ModelParams:
         # Скрининг и доступный колхицин (фертильность 1.0).
         # Охват скрининга 30%. Из выявленных пар 70% принимают решение рожать (screening_efficiency=0.7).
         # PGT нет, рожают естественным путем.
-        return ModelParams(ethnic_assortativity=0.75, do_diagnosing=True, use_screening=True,
-                           screening_coverage=0.3, screening_efficiency=0.7, fertility_recovery=1.0,
-                           ethnic_distribution={'Armenian': 0.8, 'Other': 0.20}, use_pgt=False, pgt_efficiency=0.0)
+        return ModelParams(
+            ethnic_assortativity=0.75,
+            do_diagnosing=True,
+            use_screening=True,
+            screening_coverage=0.6,
+            screening_efficiency=0.3,
+            fertility_recovery=0.85,
+            ethnic_distribution={'Armenian': 0.8, 'Other': 0.20},
+            use_pgt=True,
+            pgt_efficiency=0.5
+        )
 
     @staticmethod
     def scenario_3():
         # Массовый скрининг (80%). 80% пар принимают решение в пользу рождения (screening_efficiency=0.8),
         # но делают это через ЭКО + PGT (решение об ЭКО принимают 50%).
-        return ModelParams(ethnic_assortativity=0.55, do_diagnosing=True, use_screening=True,
-                           screening_coverage=0.8, screening_efficiency=0.8, fertility_recovery=1.0,
-                           ethnic_distribution={'Armenian': 0.65, 'Other': 0.35},
-                           use_pgt=True, pgt_efficiency=0.5)
+        return ModelParams(
+            ethnic_assortativity=0.55,
+            do_diagnosing=True,
+            use_screening=True,
+            screening_coverage=0.8,
+            screening_efficiency=0.8,
+            fertility_recovery= 0.95,
+            ethnic_distribution={'Armenian': 0.6, 'Other': 0.4},
+            use_pgt=True,
+            pgt_efficiency=0.85
+        )
 
 
     def get_bio_access_chance(self):
