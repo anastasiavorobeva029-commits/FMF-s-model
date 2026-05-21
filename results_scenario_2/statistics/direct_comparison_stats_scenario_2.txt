@@ -1,22 +1,22 @@
 === ПРЯМОЕ СРАВНЕНИЕ БЕЗ ПОПРАВОЧНОГО КОЭФФИЦИЕНТА ===
 Сценарий: scenario_2
 
-Средняя абсолютная ошибка (MAE): 0.4031%
-Среднеквадратичная ошибка (RMSE): 0.4057%
-Средняя абсолютная процентная ошибка (MAPE): 199.25%
-Средняя разница (Model - Real): 0.4031%
+Средняя абсолютная ошибка (MAE): 0.2943%
+Среднеквадратичная ошибка (RMSE): 0.2962%
+Средняя абсолютная процентная ошибка (MAPE): 145.60%
+Средняя разница (Model - Real): 0.2943%
 
 По годам:
-2012: Model=0.62%, Real=0.18%, Diff=0.44%, Relative=253.3%
-2013: Model=0.65%, Real=0.19%, Diff=0.46%, Relative=244.0%
-2014: Model=0.63%, Real=0.18%, Diff=0.45%, Relative=249.6%
-2015: Model=0.66%, Real=0.18%, Diff=0.48%, Relative=260.5%
-2016: Model=0.64%, Real=0.19%, Diff=0.46%, Relative=242.1%
-2017: Model=0.59%, Real=0.20%, Diff=0.39%, Relative=191.9%
-2018: Model=0.57%, Real=0.21%, Diff=0.36%, Relative=176.0%
-2019: Model=0.62%, Real=0.22%, Diff=0.40%, Relative=185.1%
-2020: Model=0.60%, Real=0.21%, Diff=0.39%, Relative=180.5%
-2021: Model=0.58%, Real=0.23%, Diff=0.35%, Relative=153.2%
-2022: Model=0.59%, Real=0.23%, Diff=0.36%, Relative=159.4%
-2023: Model=0.59%, Real=0.23%, Diff=0.36%, Relative=152.0%
-2024: Model=0.60%, Real=0.25%, Diff=0.35%, Relative=142.6%
+2012: Model=0.52%, Real=0.18%, Diff=0.34%, Relative=195.1%
+2013: Model=0.53%, Real=0.19%, Diff=0.34%, Relative=179.3%
+2014: Model=0.52%, Real=0.18%, Diff=0.34%, Relative=190.2%
+2015: Model=0.51%, Real=0.18%, Diff=0.33%, Relative=177.5%
+2016: Model=0.51%, Real=0.19%, Diff=0.32%, Relative=169.4%
+2017: Model=0.50%, Real=0.20%, Diff=0.30%, Relative=147.5%
+2018: Model=0.49%, Real=0.21%, Diff=0.29%, Relative=139.7%
+2019: Model=0.49%, Real=0.22%, Diff=0.28%, Relative=128.5%
+2020: Model=0.48%, Real=0.21%, Diff=0.27%, Relative=126.9%
+2021: Model=0.49%, Real=0.23%, Diff=0.26%, Relative=110.8%
+2022: Model=0.48%, Real=0.23%, Diff=0.26%, Relative=112.7%
+2023: Model=0.50%, Real=0.23%, Diff=0.26%, Relative=113.1%
+2024: Model=0.50%, Real=0.25%, Diff=0.25%, Relative=102.0%

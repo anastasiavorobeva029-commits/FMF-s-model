@@ -1,4 +1,7 @@
 import os
+import shutil
+import time
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,20 +10,57 @@ from scipy.stats import pearsonr
 from scipy.stats import linregress
 
 
-def results_of_scenarios(scenario_name):
+def clear_results_folder(base_folder, force_clear=True):
+    """Очищает папку с результатами перед записью новых данных"""
+    if force_clear and os.path.exists(base_folder):
+        print(f"🗑️ Очищаем существующую папку: {base_folder}")
+        shutil.rmtree(base_folder)
+        time.sleep(0.5)  # Небольшая пауза для гарантии удаления
+    os.makedirs(base_folder, exist_ok=True)
+    return base_folder
+
+
+def results_of_scenarios(scenario_name, force_recreate=True):
+    """Создает структуру папок для результатов"""
     base_folder = f'results_{scenario_name}'
     subfolders = ['tables', 'figures', 'statistics']
 
-    os.makedirs(base_folder, exist_ok=True)
+    if force_recreate:
+        base_folder = clear_results_folder(base_folder, force_clear=True)
+    else:
+        os.makedirs(base_folder, exist_ok=True)
+
     for subfolder in subfolders:
         os.makedirs(os.path.join(base_folder, subfolder), exist_ok=True)
+
+    # Создаем файл лога с timestamp
+    log_file = os.path.join(base_folder, 'run_info.txt')
+    with open(log_file, 'w', encoding='utf-8') as f:
+        f.write(f'Время запуска: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+        f.write(f'Сценарий: {scenario_name}\n')
+        f.write('Результаты пересохранены заново\n')
 
     return base_folder
 
 
-def preparation_table_for_thesis(scenario_path):
+def preparation_table_for_thesis(scenario_path, force_reload=True):
+    """Читает данные с принудительной перезагрузкой"""
     file_path = os.path.join(scenario_path, 'monte_carlo_all_runs.csv')
+
+    if force_reload:
+        # Проверяем время последней модификации файла
+        if os.path.exists(file_path):
+            mod_time = os.path.getmtime(file_path)
+            mod_time_str = datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d %H:%M:%S")
+            print(f"📁 Загружаем файл: {file_path}")
+            print(f"   Последнее изменение: {mod_time_str}")
+
+    # Принудительно читаем файл без кэширования
     z = pd.read_csv(file_path)
+
+    # Проверяем уникальность данных (добавляем хэш для отслеживания)
+    data_hash = hash(z.values.tobytes())
+    print(f"   Хэш данных: {data_hash}")
 
     full_year = z['year'].values
     full_population = z['total_population']
@@ -52,7 +92,8 @@ def preparation_table_for_thesis(scenario_path):
     interval_percent = 1.96
     number_of_simulations = 30
 
-    margin_of_error = interval_percent * (full_table_for_results.xs('std', axis=1, level=1) / np.sqrt(number_of_simulations))
+    margin_of_error = interval_percent * (
+                full_table_for_results.xs('std', axis=1, level=1) / np.sqrt(number_of_simulations))
     means = full_table_for_results.xs('mean', axis=1, level=1)
 
     ci_low = means - margin_of_error
@@ -67,7 +108,56 @@ def preparation_table_for_thesis(scenario_path):
     return full_fmf_table
 
 
-def table_for_thesis_about_fmf(full_fmf_table, scenario_name, results_folder):  # Добавлен параметр results_folder
+def load_data_from_files(scenario_path, force_reload=True):
+    """Загружает данные с принудительной перезагрузкой"""
+
+    # Принудительно запускаем сборщик мусора для очистки кэша
+    if force_reload:
+        import gc
+        gc.collect()
+
+    x = pd.read_csv('FMF_data2.csv')
+
+    y_path = os.path.join(scenario_path, 'yearly_median_1950_2125.csv')
+    y = pd.read_csv(y_path)
+
+    # Выводим информацию о загружаемых файлах
+    print(f"📁 Загружаем модельные данные: {y_path}")
+    if os.path.exists(y_path):
+        mod_time = os.path.getmtime(y_path)
+        print(f"   Последнее изменение: {datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    print(f"📁 Загружаем реальные данные: FMF_data2.csv")
+    if os.path.exists('FMF_data2.csv'):
+        mod_time = os.path.getmtime('FMF_data2.csv')
+        print(f"   Последнее изменение: {datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    x = x.rename(columns={'years': 'year'})
+
+    common_years = sorted(set(x['year']).intersection(set(y['year'])))
+    print(f"Общие годы: {common_years}")
+
+    x_filtered = x[x['year'].isin(common_years)].sort_values('year').reset_index(drop=True)
+    y_filtered = y[y['year'].isin(common_years)].sort_values('year').reset_index(drop=True)
+
+    print(f"Количество строк в реальных данных: {len(x_filtered)}")
+    print(f"Количество строк в модельных данных: {len(y_filtered)}")
+
+    statistic_table = pd.DataFrame({
+        'year': y_filtered['year'].values,
+        'real_prev': x_filtered['prevalence_0_49'].values,
+        'model_prev': y_filtered['prevalence_total_pct_median'].values,
+        'prevalence_pct_q25': y_filtered['prevalence_total_pct_q25'].values,
+        'prevalence_pct_q75': y_filtered['prevalence_total_pct_q75'].values
+    })
+
+    statistic_table['real_prev_per'] = (statistic_table['real_prev'] * 100).round(5)
+    statistic_table['turnover_rate'] = (statistic_table['real_prev_per'] / statistic_table['model_prev']).round(5)
+
+    return statistic_table
+
+# Все остальные функции остаются без изменений
+def table_for_thesis_about_fmf(full_fmf_table, scenario_name, results_folder):
     year = full_fmf_table['years_for_full']
 
     pop_mean = full_fmf_table['full_population_mean']
@@ -141,50 +231,14 @@ def table_for_thesis_about_fmf(full_fmf_table, scenario_name, results_folder):  
     return data_for_export
 
 
-def load_data_from_files(scenario_path):
-    x = pd.read_csv('FMF_data2.csv')
-
-    y_path = os.path.join(scenario_path, 'yearly_median_1950_2125.csv')
-    y = pd.read_csv(y_path)
-
-    x = x.rename(columns={'years': 'year'})
-
-    common_years = sorted(set(x['year']).intersection(set(y['year'])))
-    print(f"Общие годы: {common_years}")
-
-    x_filtered = x[x['year'].isin(common_years)].sort_values('year').reset_index(drop=True)
-    y_filtered = y[y['year'].isin(common_years)].sort_values('year').reset_index(drop=True)
-
-    print(f"Длина x_filtered: {len(x_filtered)}")
-    print(f"Длина y_filtered: {len(y_filtered)}")
-
-    print("Годы в x_filtered:", x_filtered['year'].values)
-    print("Годы в y_filtered:", y_filtered['year'].values)
-
-    statistic_table = pd.DataFrame({
-        'year': y_filtered['year'].values,
-        'real_prev': x_filtered['prevalence_0_49'].values,
-        'model_prev': y_filtered['prevalence_total_pct_median'].values,
-        'prevalence_pct_q25': y_filtered['prevalence_total_pct_q25'].values,
-        'prevalence_pct_q75': y_filtered['prevalence_total_pct_q75'].values
-    })
-
-    statistic_table['real_prev_per'] = (statistic_table['real_prev'] * 100).round(5)
-    statistic_table['turnover_rate'] = (statistic_table['real_prev_per'] / statistic_table['model_prev']).round(5)
-
-    return statistic_table
-
-
 def first_graph(statistic_table, scenario_name, results_folder):
     fig, ax = plt.subplots(1, 2, figsize=(12, 6))
 
-    # Левый график
     ax[0].plot('year', 'real_prev_per', data=statistic_table, marker='o', color="#0047AB", linewidth=2)
     ax[0].set_title('Зарегистрированная превалентность FMF\n(Данные МЗ РА, 2012–2024 гг.)', fontsize=11)
     ax[0].set_ylabel('Превалентность (%)')
     ax[0].grid(True, linestyle='--', alpha=0.7)
 
-    # Правый график
     ax[1].plot('year', 'model_prev', data=statistic_table, marker='s', color="#D22B2B", linewidth=2)
     ax[1].set_title(f'Прогностическая превалентность FMF\n(Модель {scenario_name}, 2012–2024 гг.)', fontsize=11)
     ax[1].grid(True, linestyle='--', alpha=0.7)
@@ -192,7 +246,6 @@ def first_graph(statistic_table, scenario_name, results_folder):
     plt.suptitle(f'Сценарий: {scenario_name}', fontsize=14, fontweight='bold')
     plt.tight_layout()
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'prevalence_comparison_{scenario_name}.png'), dpi=300,
                 bbox_inches='tight')
@@ -204,7 +257,6 @@ def survival_hypothesis(statistic_table, scenario_name, results_folder):
     mean_value = clean_table['turnover_rate'].mean()
     statistic_table['model_view'] = (statistic_table['model_prev'] * mean_value).round(5)
 
-    # Сохраняем статистическую таблицу
     statistics_folder = os.path.join(results_folder, 'statistics')
     statistic_table.to_csv(os.path.join(statistics_folder, f'FMF_statistic_{scenario_name}.csv'), index=False)
 
@@ -218,7 +270,6 @@ def plot_of_survival_hypothesis(statistic_table, mean_value, scenario_name, resu
     q_25 = (statistic_table['prevalence_pct_q25'] * mean_value).round(5)
     q_75 = (statistic_table['prevalence_pct_q75'] * mean_value).round(5)
 
-    # визуализация
     plt.figure(figsize=(12, 8))
     plt.fill_between(years, q_25, q_75, color='skyblue', alpha=0.4, label='IQR (25th-75th percentile)')
     plt.plot(years, line_by_model, color='red', linewidth=3,
@@ -238,7 +289,6 @@ def plot_of_survival_hypothesis(statistic_table, mean_value, scenario_name, resu
 
     plt.tight_layout()
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'survival_hypothesis_{scenario_name}.png'), dpi=300, bbox_inches='tight')
     plt.show()
@@ -251,7 +301,6 @@ def plot_dynamic_coefficient(statistic_table, years, scenario_name, results_fold
     slope, intercept = np.polyfit(years, coeff_dynamic, 1)
     trend_line = slope * np.array(years) + intercept
 
-    # визуализация
     plt.figure(figsize=(10, 8))
     plt.scatter(years, coeff_dynamic, color='black', label='Рассчитанный коэффициент за 2012 - 2024')
     plt.plot(years, trend_line, color='red', linestyle='--',
@@ -263,7 +312,6 @@ def plot_dynamic_coefficient(statistic_table, years, scenario_name, results_fold
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.legend()
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'dynamic_coefficient_{scenario_name}.png'), dpi=300, bbox_inches='tight')
     plt.show()
@@ -290,12 +338,10 @@ def calculate_pearson(statistic_table, points_by_real_data, scenario_name, resul
     sns.heatmap(matrix_of_corr, annot=True, cmap='RdYlGn', center=0, fmt=".2f")
     plt.title(f'Тепловая карта корреляции\nСценарий: {scenario_name}')
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'correlation_heatmap_{scenario_name}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Сохраняем статистику корреляции
     statistics_folder = os.path.join(results_folder, 'statistics')
     with open(os.path.join(statistics_folder, f'correlation_stats_{scenario_name}.txt'), 'w', encoding='utf-8') as f:
         f.write(f'Коэффициент корреляции Пирсона: {corr:.4f}\n')
@@ -324,7 +370,6 @@ def linear_regression(years, coeff_dynamic, scenario_name, results_folder):
     print(f"Коэффициент детерминации (R^2): {r_value ** 2:.4f}")
     print(f"P-value (значимость): {p_value:.4f}")
 
-    # визуализация
     plt.figure(figsize=(8, 6))
     plt.scatter(years, coeff_dynamic, label='Фактический динамический коэффициент выявляемости в Армении')
     plt.plot(years, slope * np.array(years) + intercept, color='red',
@@ -335,12 +380,10 @@ def linear_regression(years, coeff_dynamic, scenario_name, results_folder):
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'linear_regression_{scenario_name}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Сохраняем статистику регрессии
     statistics_folder = os.path.join(results_folder, 'statistics')
     with open(os.path.join(statistics_folder, f'regression_stats_{scenario_name}.txt'), 'w', encoding='utf-8') as f:
         f.write(f'Коэффициент наклона (beta_1): {slope:.4f}\n')
@@ -358,7 +401,6 @@ def mape_function(years, points_by_real_data, line_by_model, scenario_name, resu
     for year, error in mape_dict.items():
         print(f'Год {year}: средняя абсолютная ошибка {error:.2f} %')
 
-    # визуализация
     plt.figure(figsize=(10, 8))
 
     plt.plot(years, errors, marker='o', color='green', linestyle='--')
@@ -378,12 +420,10 @@ def mape_function(years, points_by_real_data, line_by_model, scenario_name, resu
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'mape_dynamics_{scenario_name}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Сохраняем MAPE статистику
     statistics_folder = os.path.join(results_folder, 'statistics')
     with open(os.path.join(statistics_folder, f'mape_stats_{scenario_name}.txt'), 'w', encoding='utf-8') as f:
         for year, error in mape_dict.items():
@@ -409,12 +449,10 @@ def me_function(years, points_by_real_data, line_by_model, mean_value, scenario_
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'mean_error_{scenario_name}.png'), dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Сохраняем ME статистику
     statistics_folder = os.path.join(results_folder, 'statistics')
     with open(os.path.join(statistics_folder, f'me_stats_{scenario_name}.txt'), 'w', encoding='utf-8') as f:
         f.write(f'Средняя ошибка (ME): {me_value:.4f}\n')
@@ -423,26 +461,19 @@ def me_function(years, points_by_real_data, line_by_model, mean_value, scenario_
 
 
 def direct_comparison_without_coefficient(statistic_table, scenario_name, results_folder):
-    """
-    Прямое сравнение модельных и реальных данных без поправочного коэффициента.
-    Предполагает, что все случаи FMF регистрируются в больницах.
-    """
     years = list(range(2012, 2012 + len(statistic_table)))
     points_by_real_data = statistic_table['real_prev_per'].values
-    line_by_model = statistic_table['model_prev'].values  # Используем原始的 модельные данные
+    line_by_model = statistic_table['model_prev'].values
     q_25 = statistic_table['prevalence_pct_q25'].values
     q_75 = statistic_table['prevalence_pct_q75'].values
 
-    # Визуализация прямого сравнения
     plt.figure(figsize=(14, 8))
 
-    # Модельные данные с доверительным интервалом
     plt.fill_between(years, q_25, q_75, color='lightcoral', alpha=0.3,
                      label='Model IQR (25th-75th percentile)')
     plt.plot(years, line_by_model, color='red', linewidth=3,
              label='Model Prediction (without adjustment)', marker='s')
 
-    # Реальные данные
     plt.scatter(years, points_by_real_data, color='black', marker='D', s=70,
                 label='Hospital Data (Real)', zorder=5)
     plt.plot(years, points_by_real_data, color='blue', linewidth=2, linestyle='--',
@@ -456,7 +487,6 @@ def direct_comparison_without_coefficient(statistic_table, scenario_name, result
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend(loc='upper left')
 
-    # Добавляем аннотацию о различиях
     avg_difference = np.mean(line_by_model - points_by_real_data)
     plt.text(0.02, 0.98,
              f'Avg difference (Model - Real): {avg_difference:.2f}%\n'
@@ -468,23 +498,17 @@ def direct_comparison_without_coefficient(statistic_table, scenario_name, result
 
     plt.tight_layout()
 
-    # Сохраняем график
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'direct_comparison_{scenario_name}.png'),
                 dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Рассчитываем статистики для прямого сравнения
     real_data = np.array(points_by_real_data)
     model_data = np.array(line_by_model)
 
-    # Абсолютная разница
     absolute_difference = model_data - real_data
-
-    # Относительная разница в процентах
     relative_difference = ((model_data - real_data) / real_data) * 100
 
-    # Создаем таблицу сравнения
     comparison_table = pd.DataFrame({
         'Year': years,
         'Real_Prevalence_%': real_data,
@@ -495,19 +519,16 @@ def direct_comparison_without_coefficient(statistic_table, scenario_name, result
         'Model_Q75_%': q_75
     })
 
-    # Статистические метрики
-    mae = np.mean(np.abs(absolute_difference))  # Mean Absolute Error
-    rmse = np.sqrt(np.mean(absolute_difference ** 2))  # Root Mean Square Error
-    mape = np.mean(np.abs(relative_difference))  # Mean Absolute Percentage Error
+    mae = np.mean(np.abs(absolute_difference))
+    rmse = np.sqrt(np.mean(absolute_difference ** 2))
+    mape = np.mean(np.abs(relative_difference))
 
-    # Сохраняем таблицу сравнения
     tables_folder = os.path.join(results_folder, 'tables')
     comparison_table.to_csv(
         os.path.join(tables_folder, f'direct_comparison_{scenario_name}.csv'),
         index=False, encoding='utf-8-sig', sep=';', decimal=','
     )
 
-    # Сохраняем статистики
     statistics_folder = os.path.join(results_folder, 'statistics')
     with open(os.path.join(statistics_folder, f'direct_comparison_stats_{scenario_name}.txt'),
               'w', encoding='utf-8') as f:
@@ -523,10 +544,8 @@ def direct_comparison_without_coefficient(statistic_table, scenario_name, result
             f.write(f'{year}: Model={model_data[i]:.2f}%, Real={real_data[i]:.2f}%, '
                     f'Diff={absolute_difference[i]:.2f}%, Relative={relative_difference[i]:.1f}%\n')
 
-    # Визуализация разницы
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # График абсолютной разницы
     axes[0].bar(years, absolute_difference, color=['red' if x > 0 else 'green' for x in absolute_difference])
     axes[0].axhline(y=0, color='black', linestyle='-', linewidth=1)
     axes[0].set_title(f'Absolute Difference (Model - Real)\nСценарий: {scenario_name}')
@@ -535,7 +554,6 @@ def direct_comparison_without_coefficient(statistic_table, scenario_name, result
     axes[0].grid(True, alpha=0.3)
     axes[0].tick_params(axis='x', rotation=45)
 
-    # График относительной разницы
     axes[1].bar(years, relative_difference, color=['red' if x > 0 else 'green' for x in relative_difference])
     axes[1].axhline(y=0, color='black', linestyle='-', linewidth=1)
     axes[1].set_title(f'Relative Difference ((Model-Real)/Real*100)\nСценарий: {scenario_name}')
@@ -546,13 +564,11 @@ def direct_comparison_without_coefficient(statistic_table, scenario_name, result
 
     plt.tight_layout()
 
-    # Сохраняем график разницы
     figures_folder = os.path.join(results_folder, 'figures')
     plt.savefig(os.path.join(figures_folder, f'difference_analysis_{scenario_name}.png'),
                 dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Выводим основные результаты в консоль
     print(f"\n=== ПРЯМОЕ СРАВНЕНИЕ ДЛЯ {scenario_name} ===")
     print(f"Средняя абсолютная ошибка (MAE): {mae:.4f}%")
     print(f"Среднеквадратичная ошибка (RMSE): {rmse:.4f}%")
@@ -576,21 +592,24 @@ if __name__ == '__main__':
     scenarios = ['scenario_1', 'scenario_2', 'scenario_3']
 
     for sc in scenarios:
-        print(f"\n>>> ОБРАБОТКА: {sc} <<<")
+        print(f"\n{'=' * 60}")
+        print(f">>> ОБРАБОТКА: {sc} <<<")
+        print(f"Время начала: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'=' * 60}")
 
-        # Создаем структуру папок для текущего сценария
-        results_folder = results_of_scenarios(sc)
+        # Создаем структуру папок для текущего сценария (принудительно пересоздаем)
+        results_folder = results_of_scenarios(sc, force_recreate=True)
 
-        # Передаем название папки в загрузку
-        df = preparation_table_for_thesis(sc)
+        # Загружаем данные с принудительной перезагрузкой
+        df = preparation_table_for_thesis(sc, force_reload=True)
 
-        # Передаем таблицу, имя сценария и папку для сохранения
+        # Сохраняем таблицу
         table_for_thesis_about_fmf(df, sc, results_folder)
 
         # Загружаем данные статистики
-        data = load_data_from_files(sc)
+        data = load_data_from_files(sc, force_reload=True)
 
-        # Вызываем всё остальное по очереди с передачей имени сценария и папки
+        # Вызываем всё остальное
         first_graph(data, sc, results_folder)
 
         # Прямое сравнение без коэффициента
@@ -605,4 +624,5 @@ if __name__ == '__main__':
         result_of_mape = mape_function(years, r_d, p_d, sc, results_folder)
         m_e = me_function(years, r_d, p_d, mean_value, sc, results_folder)
 
-        print(f"✅ Результаты для {sc} сохранены в папку: {results_folder}")
+        print(f"\n✅ Результаты для {sc} сохранены в папку: {results_folder}")
+        print(f"   Время завершения: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
