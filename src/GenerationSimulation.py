@@ -687,152 +687,112 @@ class GenerationSimulation:
                     self._fertility_map[age] = fertility_value
 
     def _get_fertility_factor(self, age: int, agent: Agent = None) -> float:
-        """Учитывает возраст и, если передан агент, его состояние здоровья"""
         if 18 <= age <= 45:
             base_factor = self._fertility_map[age]
 
-            #  учитываем fertility_recovery для больных женщин
-            if agent and agent.gender == 'female' and agent.clinical_status == 'symptomatic':
-                base_factor *= self.params.fertility_recovery
+            # применяем fertility_recovery к СРЕДНЕЙ фертильности популяции,
+            # либо делаем его множителем для всех, но с разным весом для больных.
+            if agent and agent.gender == 'female':
+                # Если больна - штрафуем сильнее, если здорова - применяем базовый бонус
+                if agent.clinical_status == 'symptomatic':
+                    base_factor *= self.params.fertility_recovery
+                else:
+                    # Бонус за общее улучшение медицины/уровня жизни во 2 и 3 сценариях
+                    base_factor *= (0.9 + (self.params.fertility_recovery * 0.1))
 
             return base_factor
         return 0.0
 
-
     def _birth_process(self):
         # 1. Подготовка демографических ограничений
         children_penalty_map = {0: 1.0, 1: 1.0, 2: 0.8, 3: 0.4}
-
         potential_mothers = []
         fathers_cache = {}
 
-        # Фильтрация пула кандидатов за один проход
         for agent in self.agents.values():
             if agent.alive and agent.gender == 'female' and agent.can_get_pregnant(self.year, self.birth_cooldown):
                 potential_mothers.append(agent)
                 if agent.partner_id and agent.partner_id in self.agents:
                     fathers_cache[agent.id] = self.agents[agent.partner_id]
 
-        # 2. Основной цикл симуляции беременностей
+        # 2. Основной цикл
         for mother in potential_mothers:
             father = fathers_cache.get(mother.id)
             if not father or not father.alive:
                 continue
 
-            # Социальный фактор: штраф за многодетность (снижение мотивации)
             family_key = self._get_family_key(father, mother)
             current_children_count = self.family_children_count.get(family_key, 0)
             children_penalty = children_penalty_map.get(current_children_count, 0.1)
-
-            # Биологический фактор: возрастной коэффициент фертильности
             age_factor = self._get_fertility_factor(mother.age, mother)
+
             if age_factor <= 0:
                 continue
 
-            # Итоговая вероятность реализации репродуктивного намерения в этом году
             birth_prob = self.base_birth_prob * age_factor * children_penalty
 
             if random.random() < birth_prob:
-                child_was_born = False
-                force_healthy_child = False
-
-
-                # Вычисляем чистый природный генотип ДО вмешательства медицины
+                # --- СБОР СТАТИСТИКИ (ТОРЕТИЧЕСКАЯ БИОЛОГИЯ) ---
                 raw_fa = random.choice([father.mefv_allele_1, father.mefv_allele_2])
                 raw_ma = random.choice([mother.mefv_allele_1, mother.mefv_allele_2])
                 raw_m_count = (1 if raw_fa != 'N' else 0) + (1 if raw_ma != 'N' else 0)
                 raw_status = 'healthy' if raw_m_count == 0 else ('carrier' if raw_m_count == 1 else 'affected')
-
-                # ИСПРАВЛЕНИЕ: Используем канонический генератор ключей класса, совпадающий с валидатором
                 combo_key = self._get_combo_key_for_theory(mother, father)
+                # -----------------------------------------------
 
-                # Записываем чистую теорию Менделя с соблюдением типов данных
-                if combo_key not in self.inheritance_stats.combo_children_genotypes:
-                    from collections import defaultdict
-                    d = defaultdict(int)
-                    d['healthy'] = 0
-                    d['carrier'] = 0
-                    d['affected'] = 0
-                    self.inheritance_stats.combo_children_genotypes[combo_key] = d
+                child_born = False
+                force_healthy_child = False  # True = отсеиваем только больных (affected)
 
-                self.inheritance_stats.combo_children_genotypes[combo_key][raw_status] += 1
-                # ===============================================
-
-                # МЕДИКО-ГЕНЕТИЧЕСКИЙ БЛОК
+                # Медико-генетический блок
                 if self.year >= self.screening_start_year and self.params.use_screening:
-
-                    # Шаг А: Реализация охвата программы
                     if not (mother.is_screened and father.is_screened):
                         if random.random() < self.params.screening_coverage:
                             mother.is_screened = True
                             father.is_screened = True
 
-                    # Шаг Б: Если пара идентифицирована и знает свой статус
                     if mother.is_screened and father.is_screened:
-                        father_is_carrier = (father.mefv_allele_1 != 'N' or father.mefv_allele_2 != 'N')
-                        mother_is_carrier = (mother.mefv_allele_1 != 'N' or mother.mefv_allele_2 != 'N')
-                        is_high_risk = father_is_carrier and mother_is_carrier
+                        is_high_risk = (father.mefv_allele_1 != 'N' or father.mefv_allele_2 != 'N') and \
+                                       (mother.mefv_allele_1 != 'N' or mother.mefv_allele_2 != 'N')
 
-                        if is_high_risk:
-                            # Комплаентность: доля пар, готовых менять поведение под влиянием медицины
-                            if random.random() < self.params.screening_efficiency:
-
-                                if self.params.use_pgt and self.year >= self.pgt_start_year:
-                                    # СЦЕНАРИЙ 3:
-
-                                    # ФАКТОР 1: Социально-финансовый барьер принятия решения
+                        if is_high_risk and random.random() < self.params.screening_efficiency:
+                            if self.params.use_pgt and self.year >= self.pgt_start_year:
+                                if random.random() < self.params.pgt_efficiency:
+                                    self.pgt_attempts += 1
                                     if random.random() < self.params.pgt_efficiency:
-
-                                        # ПЛАН А: Пара согласилась и вступила в протокол ЭКО
-                                        self.pgt_attempts += 1  # Фиксируем попытку ДО броска на приживаемость
-
-                                        # ФАКТОР 2: Медицинская результативность (приживаемость эмбриона)
-                                        if random.random() < self.params.pgt_efficiency:
-                                            # Успешный цикл — беременность наступила!
-                                            force_healthy_child = True
-                                            child_was_born = True
-                                            self.pgt_births += 1
-
-                                            # Расчет предотвращенного бремени болезни
-                                            if random.random() < 0.25:
-                                                self.prevented_fmf_births += 1
-                                        else:
-                                            # Медицинская неудача цикла. Эмбрион не прижился.
-                                            # В этом году ребенок не родился, пара пропускает ход.
-                                            continue  # Переходим к следующей матери
-                                    else:
-                                        # ПЛАН Б: Пара ОТКАЗАЛАСЬ от PGT из-за финансового барьера
-                                        self.pgt_eligible_but_declined += 1
-
-                                        # Отказавшиеся уходят на обычные естественные роды (продолжают выполнение вниз)
-                                        force_healthy_child = False
-                                        child_was_born = False
-                                else:
-                                    # СЦЕНАРИЙ 2: Пренатальная диагностика (ПД)
-                                    if random.random() < 0.25:
-                                        self.prevented_fmf_births += 1
-                                        continue
-                                    else:
+                                        child_born = True
                                         force_healthy_child = True
-                                        child_was_born = True
+                                        self.pgt_births += 1
+                                        if raw_status == 'affected': self.prevented_fmf_births += 1
+                                    else:
+                                        continue
+                                else:
+                                    self.pgt_eligible_but_declined += 1
+                            elif random.random() < 0.25:
+                                self.prevented_fmf_births += 1
+                                continue
                             else:
-                                # Пары, отказавшиеся от интервенций: идут на естественный риск ниже
-                                pass
+                                child_born = True
+                        else:
+                            child_born = True
+                    else:
+                        child_born = True
+                else:
+                    child_born = True
 
-                # 3. Финализация рождения и вызов конструктора агента
-                if not child_was_born:
-                    # Обычные естественные роды
-                    self._create_child_with_detailed_tracking(mother, father, force_healthy=False)
-                    child_was_born = True
-                elif force_healthy_child:
-                    # Рождается отфильтрованный ребенок
-                    child = self._create_child_with_detailed_tracking(mother, father, force_healthy=True)
-                    if child:
+                # 3. Финализация рождения
+                child = self._create_child_with_detailed_tracking(mother, father, force_healthy=force_healthy_child)
+
+                if child:
+                    # --- ЗАПИСЬ В СТАТИСТИКУ МЕНДЕЛЯ ---
+                    if combo_key not in self.inheritance_stats.combo_children_genotypes:
+                        from collections import defaultdict
+                        self.inheritance_stats.combo_children_genotypes[combo_key] = defaultdict(int)
+                    self.inheritance_stats.combo_children_genotypes[combo_key][raw_status] += 1
+                    # -----------------------------------
+
+                    if force_healthy_child:
                         self.pgt_children_ids.append(child.id)
-                    child_was_born = True
 
-                # Обновление демографических логов семьи (строго при подтвержденном рождении)
-                if child_was_born:
                     self.family_children_count[family_key] = current_children_count + 1
                     mother.last_birth_year = self.year
                     self.children_born += 1
@@ -2252,12 +2212,12 @@ class GenerationSimulation:
         nat_affected = sum(1 for c in natural_high_risk_children if c.mefv_allele_1 != 'N' and c.mefv_allele_2 != 'N')
         nat_pct = (nat_affected / len(natural_high_risk_children) * 100) if natural_high_risk_children else 0.0
         print(
-            f"      └─ Из них родились с диагнозом FMF (M/M)                 : {nat_affected} ({nat_pct:.1f}%) [Близко к 25% Менделя]")
+            f"      └─ Из них родились с диагнозом FMF (M/M)                 : {nat_affected} ({nat_pct:.1f}%)")
 
         print(f"      Родоразрешения с применением технологий PGT             : {len(pgt_children)} детей")
         pgt_affected = sum(1 for c in pgt_children if c.mefv_allele_1 != 'N' and c.mefv_allele_2 != 'N')
         print(
-            f"      └─ Из них родились с диагнозом FMF (M/M)                 : {pgt_affected} (0.0%) [Абсолютная защита]")
+            f"      └─ Из них родились с диагнозом FMF (M/M)                 : {pgt_affected} (0.0%)")
 
         # Выводим честную сквозную переменную предотвращенных случаев
         print(f"      Глобальный кумулятивный счетчик предотвращенных FMF      : {prevented_cases} случаев")

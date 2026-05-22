@@ -18,7 +18,7 @@ class ModelParams:
     systemic_diagnosis_start_year: int = 1990
     screening_start_year: int = 2010
     pgt_start_year: int = 2018
-    num_runs: int = 3
+    num_runs: int = 2
     max_age_limit: int = 85
     initial_population_size: int = 5_000
     diagnosis_slope: float = 0.012350
