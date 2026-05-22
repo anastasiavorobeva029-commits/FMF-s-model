@@ -36,26 +36,26 @@ def load_demographic_data():
     data = {}
     for name, filename in files.items():
 
-        # ВАЖНО: decimal='.' так как в файлах точки (30.2)
-        # skipinitialspace=True уберет лишние пробелы после разделителя
+        # явный парсинг точек в качестве разделителей и зачистка пробелов по краям
         df = pd.read_csv(filename, sep=';', skipinitialspace=True, decimal='.')
 
-        # Принудительная конвертация числовых колонок (на всякий случай)
+        # подстраховка на случай скрытых проблем с типами данных в ячейках
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
 
+        # разделяем логику индексации: для распределений важен возраст, для коэффициентов — год
         if name in ['age_structure_1950', 'age_fertility_dist']:
             df.set_index(df.columns[0], inplace=True)
             df.index.name = 'Age_Group'
         else:
             df.set_index(df.columns[0], inplace=True)
             df.index.name = 'Year'
-            # Переименовываем колонку с данными в название ключа (напр. 'birth_rate')
+            # приводим имя колонки к единому названию для удобного обращения в модели
             df.columns = [name]
 
         data[name] = df
-        print(f"  ✓ Загружен {filename}: {df.shape}, тип данных: {df[df.columns[0]].dtype}")
+        print(f"  ✓ загружен {filename}: {df.shape}, тип данных: {df[df.columns[0]].dtype}")
 
     return (
         data['birth_rate'],
@@ -66,127 +66,124 @@ def load_demographic_data():
     )
 
 def print_final_validation_average(all_startup_stats, target_metrics):
-    """
-    Валидирует стартовые параметры популяции (1950 г.) по нескольким итерациям.
-    """
 
-    # Расширенные метки
+    # Валидирует стартовые параметры популяции (1950 г.) по нескольким итерациям.
+
+
+    # читаемые метки для консольного вывода результатов валидации
     labels = {
-        'arm_count': 'Армяне (N)',
-        'oth_count': 'Другие (N)',
-        'endo_count': 'Эндогамия',
-        'exo_count': 'Экзогамия',
-        'carrier_count': 'Носители FMF',
-        'm694v_freq': 'Частота M694V'
+        'arm_count': 'армяне (n)',
+        'oth_count': 'другие (n)',
+        'endo_count': 'эндогамия',
+        'exo_count': 'экзогамия',
+        'carrier_count': 'носители fmf',
+        'm694v_freq': 'частота m694v'
     }
 
-    # 1. Рассчитываем проценты для КАЖДОГО прогона отдельно (Vectorized way)
+    # собираем сырые данные всех прогонов в единый датафрейм для векторизованных расчетов
     df_startup = pd.DataFrame(all_startup_stats)
     df_startup['total_pop'] = df_startup['arm_count'] + df_startup['oth_count']
 
+    # определяем средний объем популяции по всем итерациям для контроля репрезентативности
     avg_total = df_startup['total_pop'].mean()
 
-    print("\n" + "═" * 85)
-    print(f" Валидация стартовой популяции (1950 г.) | N = {len(df_startup)} итераций")
-    print(f"    Средний размер выборки: {avg_total:.1f} чел.")
-    print("═" * 85)
-    print(f"{'Параметр':<18} | {'Среднее % (±std)':<18} | {'Цель %':>8} | {'Ошибка':>10} | {'Статус'}")
-    print("-" * 85)
+    print(f"\nвалидация стартовой популяции (1950 г.) | n = {len(df_startup)} итераций")
+    print(f"средний размер выборки: {avg_total:.1f} чел.")
+    print(f"{'параметр':<18} | {'среднее % (±std)':<18} | {'цель %':>8} | {'ошибка':>10} | {'статус'}")
 
     for key, target_pct in target_metrics.items():
         if key not in df_startup.columns:
             continue
 
-        # Считаем процент в каждом прогоне
+        # вычисляем долю конкретного признака внутри каждого прогона независимо
         per_run_pct = (df_startup[key] / df_startup['total_pop']) * 100
 
+        # считаем интервальные оценки: среднее значение и стандартное отклонение долей
         avg_pct = per_run_pct.mean()
         std_pct = per_run_pct.std()
         diff = avg_pct - target_pct
 
-        # Статус на основе отклонения
+        # качественная оценка точности настройки генератора по величине отклонения
         abs_diff = abs(diff)
         if abs_diff < 1.5:
-            status = "✅ MATCH"
+            status = "match"
         elif abs_diff < 4.0:
-            status = "TOLERANT"
+            status = "tolerant"
         else:
-            status = "RE-CALIBRATE"
+            status = "re-calibrate"
 
         label = labels.get(key, key)
-        # Выводим среднее значение процентов и отклонение
+        # форматированный вывод строки с сопоставлением экспериментальных и целевых значений
         print(f"{label:<18} | {avg_pct:>7.2f}% (±{std_pct:>4.2f}) | {target_pct:>7.2f}% | {diff:>+7.2f}% | {status}")
 
 
-
 def aggregate_multiple_runs(results_list: List[Dict], target_values: Dict = None) -> pd.DataFrame:
-    """
-    Агрегирует финальные результаты множественных прогонов.
-    Рассчитывает среднее, 95% ДИ и отклонение от эталонных значений (target).
-    """
+
+    # Агрегирует финальные результаты множественных прогонов.
+    # Рассчитывает среднее, 95% ДИ и отклонение от эталонных значений (target).
 
 
     df = pd.DataFrame(results_list)
 
-    # Список ключевых метрик для итогового отчета
+    # список отслеживаемых параметров для финального эпидемиологического отчета
     metrics = [
-        'prevalence_total_pct',  # Общая превалентность
-        'm694v_homo_in_affected_pct', 'compound_in_affected_pct',  # Генетика
+        'prevalence_total_pct',  # общая распространенность заболевания
+        'm694v_homo_in_affected_pct', 'compound_in_affected_pct',  # доли тяжелых генотипов
         'hetero_in_affected_pct', 'other_homo_in_affected_pct',
-        'prevented_births_total',  # Эффективность (Сценарий 2)
-        'diagnosed_pct',  # Качество диагностики
-        'avg_model_birth_rate', 'avg_model_death_rate'  # Демография
+        'prevented_births_total',  # кумулятивное число предотвращенных рождений с fmf
+        'diagnosed_pct',  # охват клинической диагностикой
+        'avg_model_birth_rate', 'avg_model_death_rate'  # демографические маркеры
     ]
 
     available_metrics = [m for m in metrics if m in df.columns]
 
     n_runs = len(df['run_id'].unique()) if 'run_id' in df.columns else len(results_list)
-    print(f" Итоговая агрегация {n_runs} прогонов Монте-Карло...")
+    print(f"итоговая агрегация {n_runs} прогонов монте-карло...")
 
     summary = []
     for metric in available_metrics:
         values = df[metric].dropna()
         n = len(values)
-        if n == 0: continue
+        if n == 0:
+            continue
 
         mean_val = values.mean()
         std_val = values.std()
-        # Стандартная ошибка среднего (SEM)
+
+        # расчет стандартной ошибки и доверительного интервала для среднего значения
         sem = std_val / np.sqrt(n) if n > 1 else 0
         ci_95 = 1.96 * sem
 
-        # Дополнительно: перцентили (показывают реальный разброс модели)
+        # расчет эмпирических перцентилей для фиксации истинных границ распределения
         p025 = values.quantile(0.025)
         p975 = values.quantile(0.975)
 
         result = {
-            'Метрика': metric,
-            'Среднее': round(mean_val, 3),
-            '95% ДИ (±)': round(ci_95, 3),
-            'Диапазон (2.5-97.5%)': f"[{p025:.2f} - {p975:.2f}]",
-            'Std_Dev': round(std_val, 3),
-            'N_прогонов': n
+            'метрика': metric,
+            'среднее': round(mean_val, 3),
+            '95% ди (±)': round(ci_95, 3),
+            'диапазон (2.5-97.5%)': f"[{p025:.2f} - {p975:.2f}]",
+            'std_dev': round(std_val, 3),
+            'n_прогонов': n
         }
 
-        # Сверка с эталоном (Валидация для диплома)
+        # сопоставление экспериментальных средних с реальными медицинскими данными
         if target_values and metric in target_values:
             target = target_values[metric]
             diff = mean_val - target
-            result['Эталон'] = target
-            result['Отклонение'] = round(diff, 3)
-            # Статистический вердикт: попадает ли эталон в наш ДИ?
-            result['Валидность'] = " OK" if abs(diff) <= ci_95 else " Bias"
+            result['эталон'] = target
+            result['отклонение'] = round(diff, 3)
+
+            # проверка гипотезы о вхождении эталона в доверительный интервал
+            result['валидность'] = "ok" if abs(diff) <= ci_95 else "bias"
 
         summary.append(result)
 
     summary_df = pd.DataFrame(summary)
 
-    # Красивый вывод в консоль для контроля
-    print("\n" + "─" * 95)
-    print(f"{'Финальная валидация модели':^95}")
-    print("─" * 95)
+    print(f"\nфинальная валидация модели")
     print(summary_df.to_string(index=False))
-    print("─" * 95 + "\n")
+    print("\n")
 
     return summary_df
 
@@ -196,29 +193,27 @@ def prepare_results_for_analysis(results_list):
     flattened_data = []
 
     for run_data in results_list:
-        # Если run_data — это один словарь (а не список лет), оборачиваем его
+        # если данные пришли в виде одного словаря, приводим их к списку для унификации
         current_run = run_data if isinstance(run_data, list) else [run_data]
 
         for entry in current_run:
             if not isinstance(entry, dict):
                 continue
 
-            # Создаем строку данных
             row = {}
-
 
             year_val = entry.get('year')
             if year_val is None:
-                continue  # Пропускаем записи без года
+                continue  # отсекаем некорректные временные срезы без указания года
 
             row['year'] = int(year_val)
 
-            # Переименовываем 'total_agents' в 'total_population' для совместимости
+            # стандартизируем название ключевой метрики объема популяции
             row['total_population'] = entry.get('total_agents', entry.get('total_population', 0))
 
-            # Подхватываем все остальные ключи (превалентность, мутации и т.д.)
+            # собираем все оставшиеся эпидемиологические показатели без повторения ключей
             for key, value in entry.items():
-                if key not in ['year', 'total_agents']:  # избегаем дублей
+                if key not in ['year', 'total_agents']:
                     row[key] = value
 
             flattened_data.append(row)
@@ -231,32 +226,29 @@ def prepare_results_for_analysis(results_list):
 def analyze_yearly_median_across_runs(results_list: List[Dict],
                                       years_range: range = range(1950, 2126),
                                       output_file: str = 'yearly_median_analysis.csv'):
-    # 1. Сначала "выпрямляем" вложенные словари (используем твою новую функцию)
-    # Это гарантирует, что 'on_colchicine', 'diagnosed' и т.д. станут колонками
+    # приводим вложенную структуру к плоскому датафрейму
     df_all = prepare_results_for_analysis(results_list)
 
-    # 2. Расширяем список метрик, чтобы включить всё самое важное для Master's Thesis
+    # список ключевых эпидемиологических, медицинских и генетических маркеров
     key_metrics = [
         'total_population', 'total_affected', 'prevalence_total_pct',
-        # Медицина и скрининг
         'on_colchicine', 'diagnosed', 'undiagnosed_symptomatic',
         'prevented_births_total',
         'total_screened',
-        # Генетика - исправленные имена!
-        'm694v_homo_in_affected_pct',  # вместо 'M694V_homozygous'
-        'compound_in_affected_pct',  # вместо 'compound_heterozygous'
-        'hetero_in_affected_pct',  # вместо 'heterozygous'
-        'other_homo_in_affected_pct','m694v_homo_absolute',
+        'm694v_homo_in_affected_pct',
+        'compound_in_affected_pct',
+        'hetero_in_affected_pct',
+        'other_homo_in_affected_pct', 'm694v_homo_absolute',
         'm694v_homo_prevalence_pct',
         'total_carriers_absolute',
-        # Аллели
         'allele_freq_M694V', 'allele_freq_N', 'total_births', 'total_deaths'
     ]
-    # Фильтруем по калибровочному окну (2012-2024)
+
+    # фильтрация данных по заданному временному интервалу моделирования
     df_filtered = df_all[df_all['year'].isin(years_range)].copy()
 
     if df_filtered.empty:
-        print(f" Нет данных за годы {min(years_range)}-{max(years_range)}")
+        print(f"нет данных за годы {min(years_range)}-{max(years_range)}")
         return pd.DataFrame()
 
     yearly_stats = []
@@ -266,15 +258,15 @@ def analyze_yearly_median_across_runs(results_list: List[Dict],
         stats = {'year': year, 'n_runs': len(year_data)}
 
         for metric in key_metrics:
-            # Проверяем, есть ли колонка (некоторые мутации могут не появиться в конкретном году)
+            # проверяем присутствие признака в текущем срезе данных
             if metric in year_data.columns:
                 values = year_data[metric].dropna()
                 if len(values) > 0:
                     stats[f'{metric}_median'] = values.median()
-                    # 95% Доверительный интервал (CI) — золотой стандарт для публикаций
+                    # вычисление границ доверительного интервала для оценки разброса траекторий
                     stats[f'{metric}_ci_low'] = values.quantile(0.025)
                     stats[f'{metric}_ci_high'] = values.quantile(0.975)
-                    # Квартили для "ящиков с усами" (boxplots)
+                    # расчет квартилей для последующей визуализации распределений
                     stats[f'{metric}_q25'] = values.quantile(0.25)
                     stats[f'{metric}_q75'] = values.quantile(0.75)
 
@@ -283,31 +275,13 @@ def analyze_yearly_median_across_runs(results_list: List[Dict],
     result_df = pd.DataFrame(yearly_stats)
     result_df.to_csv(output_file, index=False)
 
-    print(f" Обработано показателей: {len(key_metrics)} для каждого из {len(result_df)} лет.")
+    print(f"обработано показателей: {len(key_metrics)} для каждого из {len(result_df)} лет.")
 
     return result_df
 
-
 def print_yearly_analysis_summary(yearly_df, metrics_to_show=None, targets=None,
                                   verbose=True, save_to_file=None, scenario_name=None):
-    """
-    Выводит детальный медианный анализ по годам.
 
-    Parameters:
-    -----------
-    yearly_df : pd.DataFrame
-        Данные с медианами по годам
-    metrics_to_show : list, optional
-        Список метрик для отображения
-    targets : dict, optional
-        Целевые значения для сравнения
-    verbose : bool, default=True
-        Выводить ли в консоль
-    save_to_file : str, optional
-        Путь к файлу для сохранения (если None, не сохраняет)
-    scenario_name : str, optional
-        Название сценария для заголовка файла
-    """
     if metrics_to_show is None:
         metrics_to_show = [
             'total_agents', 'prevalence_total_pct',
@@ -404,24 +378,26 @@ def run_multiple_simulations(params: ModelParams,
     """
     birth_rate, death_rate, tfr_data, age_structure, fert_factors = data_files
 
-    #  Безопасная очистка кэша
+    # безопасная очистка кэша перед началом вычислений
     from caches import _SIMULATION_CACHE, _CACHE_LOCK
     with _CACHE_LOCK:
         _SIMULATION_CACHE.clear()
-        if show_progress: print(" Кэш очищен. Подготовка к свежему запуску...")
+        if show_progress:
+            print("кэш очищен. подготовка к свежему запуску...")
 
-    # Настройка параллелизма
+    # динамическое определение количества доступных вычислительных ядер
     max_workers = (os.cpu_count() or 4) - 1 if parallel else 1
-    if not parallel: max_workers = 1
+    if not parallel:
+        max_workers = 1
 
     results = []
     all_startup_stats = []
 
-    # Подготовка фильтра (создаем set для O(1) поиска)
+    # оптимизация поиска за счет перевода списка сохраняемых лет во множество
     years_set = set(years_to_keep) if years_to_keep is not None else None
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Используем partial для фиксации неизменных аргументов
+        # фиксация общих демографических таблиц для всех параллельных потоков
         run_func = partial(
             run_single_simulation_optimized,
             params=params,
@@ -434,26 +410,26 @@ def run_multiple_simulations(params: ModelParams,
             use_cache=True
         )
 
-        # Запускаем задачи
+        # отправка пула задач на выполнение независимых прогонов
         future_to_run = {executor.submit(run_func, run_id=i): i for i in range(params.num_runs)}
 
-        # Обработка результатов по мере готовности
+        # отслеживание прогресса выполнения многопоточных вычислений
         iterator = as_completed(future_to_run)
         if show_progress:
-            iterator = tqdm(iterator, total=params.num_runs, desc=" Monte Carlo Ensemble", unit="sim")
+            iterator = tqdm(iterator, total=params.num_runs, desc="monte carlo ensemble", unit="sim")
 
         for future in iterator:
+            # таймаут с запасом для исключения зависания тяжелых агентных моделей
+            run_result = future.result(timeout=600)
+            if not run_result:
+                continue
 
-            run_result = future.result(timeout=600)  # Увеличили таймаут для тяжелых ABM
-            if not run_result: continue
-
-            # 🟢 ШАГ 1: Валидация основателей (Всегда берем 0-й элемент — 1950 год)
-            # Важно: берем статистику до всяких фильтров!
+            # шаг 1: извлечение калибровочных данных для нулевого (1950) года
             first_year_data = run_result[0] if isinstance(run_result, list) else run_result
             if 'startup_validation' in first_year_data:
                 all_startup_stats.append(first_year_data['startup_validation'])
 
-            # 🟢 ШАГ 2: Фильтрация лет для экономии памяти
+            # шаг 2: фильтрация и сохранение временных срезов для снижения нагрузки на озу
             if isinstance(run_result, list):
                 for yearly_res in run_result:
                     if years_set is None or yearly_res.get('year') in years_set:
@@ -462,11 +438,11 @@ def run_multiple_simulations(params: ModelParams,
                 if years_set is None or run_result.get('year') in years_set:
                     results.append(run_result)
 
-
-    # 🟢 ШАГ 3: Финальный научный аудит старта (1950 г.)
+    # шаг 3: финальный статистический анализ корректности генерации популяции основателей
     if all_startup_stats:
-        # Корректный расчет целей (обрабатываем и 0.9, и 90.0)
-        def to_pct(val): return val * 100 if val <= 1.0 else val
+        # приведение долей к единому процентному формату
+        def to_pct(val):
+            return val * 100 if val <= 1.0 else val
 
         target_metrics = {
             'arm_count': to_pct(params.ethnic_distribution.get('Armenian', 0.9)),
@@ -475,40 +451,33 @@ def run_multiple_simulations(params: ModelParams,
             'exo_count': to_pct(1 - params.ethnic_assortativity)
         }
 
-        # Вызываем нашу красивую функцию из предыдущего шага
+        # сопоставление сгенерированных параметров с историческими маркерами
         print_final_validation_average(all_startup_stats, target_metrics)
 
-    print(f"Успешно завершено: {params.num_runs} прогонов. Собрано {len(results)} точек данных.")
+    print(f"успешно завершено: {params.num_runs} прогонов. собрано {len(results)} точек данных.")
     return results
-
 
 def run_model(model_params: ModelParams):
     for f in glob.glob("*.csv") + glob.glob("*.txt"):
         os.remove(f)
 
-
     start_time = time.time()
 
-    # Определяем параметры системы
+    # определяем параметры системы
     cpu_count = psutil.cpu_count(logical=True)
     available_memory = psutil.virtual_memory().available / (1024 ** 3)
 
-    # Автоматический выбор режима
+    # автоматический выбор режима
     quick_mode = available_memory < 4 or model_params.num_runs > 20
     max_workers = min(16, cpu_count) if cpu_count else 4
 
     data_files = load_demographic_data()
     birth_rate, death_rate, tfr_data, age_structure, fert_factors = data_files
 
-    # =========================================================================
-    # ЧАСТЬ 1: МНОЖЕСТВЕННЫЕ ПРОГОНЫ (MONTE CARLO)
-    # =========================================================================
+    # часть 1: множественные прогоны (monte carlo)
+    console.print(f"\nчасть 1: симуляции ({model_params.num_runs} прогонов)", style="bold blue")
 
-    console.print(f"\n{'=' * 70}", style="bold blue")
-    console.print(f"  ЧАСТЬ 1: Симуляции ({model_params.num_runs} прогонов)", style="bold blue")
-    console.print(f" {'=' * 70}", style="bold blue")
-
-    # Запуск множественных прогонов
+    # запуск множественных прогонов
     all_results = run_multiple_simulations(
         params=model_params,
         data_files=data_files,
@@ -517,12 +486,12 @@ def run_model(model_params: ModelParams):
         years_to_keep=list(range(1950, 2126))
     )
 
-    # Сохраняем результаты
+    # сохраняем результаты
     df = pd.DataFrame(all_results)
     df.to_csv("monte_carlo_all_runs.csv", index=False)
-    console.print(f"Сохранено {len(all_results)} результатов в monte_carlo_all_runs.csv")
+    console.print(f"сохранено {len(all_results)} результатов в monte_carlo_all_runs.csv")
 
-    # Целевые значения из статьи
+    # целевые значения из статьи
     target_values = {
         'm694v_homo_in_affected_pct': 11.12,
         'compound_in_affected_pct': 58.26,
@@ -531,7 +500,7 @@ def run_model(model_params: ModelParams):
         'late_onset_pct': 3.40
     }
 
-    # Агрегация результатов
+    # агрегация результатов
     summary_df = aggregate_multiple_runs(all_results, target_values)
 
     for _, row in summary_df.iterrows():
@@ -545,18 +514,13 @@ def run_model(model_params: ModelParams):
         else:
             console.print(f"{metric_name:<35} | {mean_val:>6.2f}% ± {ci_val:>4.2f}% | {status}")
 
-    # Сохраняем сводку
+    # сохраняем сводку
     summary_df.to_csv("monte_carlo_summary.csv", index=False)
 
-    # =========================================================================
-    # ЧАСТЬ 2: ДЕТАЛЬНАЯ СИМУЛЯЦИЯ (ОДИН КОНТРОЛЬНЫЙ ПРОГОН)
-    # =========================================================================
+    # часть 2: детальная симуляция (один контрольный прогон)
+    console.print("\nчасть 2: детальная валидация", style="bold magenta")
 
-    console.print(f"\n{'=' * 80}", style="bold magenta")
-    console.print("ЧАСТЬ 2: Детальная валидация", style="bold magenta")
-    console.print(f"{'=' * 80}", style="bold magenta")
-
-    # Используем один основной объект для всех детальных отчетов
+    # используем один основной объект для всех детальных отчетов
     sim = GenerationSimulation(
         params=model_params,
         birth_rate_df=birth_rate,
@@ -566,13 +530,13 @@ def run_model(model_params: ModelParams):
         fertility_factors_df=fert_factors
     )
 
-    # Запускаем один раз
+    # запускаем один раз
     sim.run_simulation_with_calibration()
 
-    console.print("\n Теоритический анализ менделевского наследования")
+    console.print("\nтеоретический анализ менделевского наследования")
     sim._print_detailed_inheritance_stats()
 
-    # Определяем текущий сценарий для именования файлов
+    # определяем текущий сценарий для именования файлов
     current_path = os.getcwd()
     if "scenario_1" in current_path:
         scenario_name = "scenario_1"
@@ -585,74 +549,60 @@ def run_model(model_params: ModelParams):
 
     sim.print_population_stats(scenario_name)
 
-    # --- Блок записи детальных отчетов в файлы ---
+    # блок записи детальных отчетов в файлы
     reports_to_save = [
-        ('calibration_check.txt', sim.log_calibration_status, "ПРОВЕРКА КАЛИБРОВКИ ГЕНОТИПОВ"),
-        ('allele_report_calibration.txt', sim.print_allele_report, "ОТЧЕТ ПО АЛЛЕЛЯМ"),
-        ('final_report_detailed.txt', sim._print_final_summary, "ПОЛНЫЙ ФИНАЛЬНЫЙ ОТЧЕТ"),
-        ('fertility_impact.txt', sim.print_fertility_report, "АНАЛИЗ ВЛИЯНИЯ НА ФЕРТИЛЬНОСТЬ"),
+        ('calibration_check.txt', sim.log_calibration_status, "проверка калибровки генотипов"),
+        ('allele_report_calibration.txt', sim.print_allele_report, "отчет по аллелям"),
+        ('final_report_detailed.txt', sim._print_final_summary, "полный финальный отчет"),
+        ('fertility_impact.txt', sim.print_fertility_report, "анализ влияния на фертильность"),
     ]
 
     for filename, method, title in reports_to_save:
         with open(f"{scenario_name}_{filename}", 'w', encoding='utf-8') as f:
             with redirect_stdout(f):
-                print("\n" + "=" * 75)
-                print(f" {title}")
-                print(f" Сценарий: {scenario_name} | Дата: {time.strftime('%Y-%m-%d %H:%M')}")
-                print("=" * 75)
+                print(f"{title}")
+                print(f"сценарий: {scenario_name} | дата: {time.strftime('%Y-%m-%d %H:%M')}\n")
                 method()
         console.print(f"   {title:<30} -> [bold]{scenario_name}_{filename}[/bold]")
 
-    # =========================================================================
-    # НОВЫЙ БЛОК: ДЕТАЛЬНЫЙ ОТЧЕТ ПО PGT ДЛЯ СЦЕНАРИЯ 3
-    # =========================================================================
+    # отчет по pgt для сценария 3
     if scenario_name == "scenario_3" and hasattr(sim, 'print_pgt_detailed_report'):
         with open(f"{scenario_name}_pgt_detailed_report.txt", 'w', encoding='utf-8') as f:
             with redirect_stdout(f):
-                print("\n" + "=" * 75)
-                print(" Детальный отчет по эффективности PGT")
-                print(f" Сценарий: {scenario_name} | Дата: {time.strftime('%Y-%m-%d %H:%M')}")
-                print("=" * 75)
+                print("детальный отчет по эффективности pgt")
+                print(f"сценарий: {scenario_name} | дата: {time.strftime('%Y-%m-%d %H:%M')}\n")
                 sim.print_pgt_detailed_report()
-        console.print(f"    Детальный PGT отчет -> [bold]{scenario_name}_pgt_detailed_report.txt[/bold]")
+        console.print(f"    детальный pgt отчет -> [bold]{scenario_name}_pgt_detailed_report.txt[/bold]")
 
-        # Также выводим в консоль для наглядности
-        console.print("\n Детальный отчет по PGT (вывод в консоль):")
+        # также выводим в консоль для наглядности
+        console.print("\nдетальный отчет по pgt (вывод в консоль):")
         sim.print_pgt_detailed_report()
 
-    # Отчет по скринингу для Сценария 2 и Сценария 3
+    # отчет по скринингу для сценария 2 и сценария 3
     if (scenario_name == "scenario_2" or scenario_name == "scenario_3") and hasattr(sim, 'print_screening_report'):
         with open(f"{scenario_name}_screening_efficiency.txt", 'w', encoding='utf-8') as f:
             with redirect_stdout(f):
                 sim.print_screening_report()
-        console.print(f"    Отчет по скринингу -> {scenario_name}_screening_efficiency.txt")
+        console.print(f"    отчет по скринингу -> {scenario_name}_screening_efficiency.txt")
 
-    # Дополнительный отчет по биопрепаратам для Сценария 3
+    # дополнительный отчет по биопрепаратам для сценария 3
     if scenario_name == "scenario_3":
         with open(f"{scenario_name}_biologics_report.txt", 'w', encoding='utf-8') as f:
             with redirect_stdout(f):
-                print("\n" + "=" * 75)
-                print(" Отчет по биопрепаратам (Антитела К ИЛ-1)")
-                print(f" Сценарий: {scenario_name} | Дата: {time.strftime('%Y-%m-%d %H:%M')}")
-                print("=" * 75)
+                print("отчет по биопрепаратам (антитела к ил-1)")
+                print(f"сценарий: {scenario_name} | дата: {time.strftime('%Y-%m-%d %H:%M')}\n")
                 living_agents = [a for a in sim.agents.values() if a.alive]
                 resistant = [a for a in living_agents if a.is_colchicine_resistant]
                 on_antibodies = [a for a in resistant if a.on_antibodies]
-                print(f"\nРезистентных к колхицину: {len(resistant)}")
-                print(f"Из них получают биопрепараты: {len(on_antibodies)}")
+                print(f"резистентных к колхицину: {len(resistant)}")
+                print(f"из них получают биопрепараты: {len(on_antibodies)}")
                 if resistant:
-                    print(f"Охват биопрепаратами: {len(on_antibodies) / len(resistant) * 100:.1f}%")
-        console.print(f"   Отчет по биопрепаратам -> {scenario_name}_biologics_report.txt")
+                    print(f"охват биопрепаратами: {len(on_antibodies) / len(resistant) * 100:.1f}%")
+        console.print(f"   отчет по биопрепаратам -> {scenario_name}_biologics_report.txt")
 
-
-    # =============================================================================
-    # ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ: МЕДИАНЫ ПО ГОДАМ
-    # =============================================================================
-
+    # дополнительный анализ: медианы по годам
     if all_results:
-        console.print(f"\n{'=' * 85}", style="bold cyan")
-        console.print(f" Медианный анализ (1950-2125)", style="bold cyan")
-        console.print(f"{'=' * 85}", style="bold cyan")
+        console.print("\nмедианный анализ (1950-2125)", style="bold cyan")
 
         yearly_median_df = analyze_yearly_median_across_runs(
             results_list=all_results,
@@ -669,17 +619,14 @@ def run_model(model_params: ModelParams):
                 'prevalence_total_pct': 0.51
             }
 
-            # ========== ИСПРАВЛЕНИЕ: Сохраняем отчет в файл ==========
-            # 1. Вывод в консоль (как было)
             print_yearly_analysis_summary(
                 yearly_median_df,
                 targets=calibration_targets,
-                verbose=False,  # Выводим в консоль
-                save_to_file=f"{scenario_name}_yearly_analysis_summary.txt",  # Сохраняем в файл
+                verbose=False,
+                save_to_file=f"{scenario_name}_yearly_analysis_summary.txt",
                 scenario_name=scenario_name
             )
-            console.print(f"   Медианный анализ -> {scenario_name}_yearly_analysis_summary.txt")
-            # =========================================================
+            console.print(f"   медианный анализ -> {scenario_name}_yearly_analysis_summary.txt")
 
             final_year_row = yearly_median_df[yearly_median_df['year'] == 2024]
             if not final_year_row.empty:
@@ -688,66 +635,47 @@ def run_model(model_params: ModelParams):
                 error = abs(model_val - target_val)
 
                 status_color = "green" if error < 0.05 else "yellow" if error < 0.1 else "red"
-                console.print(f"\n[bold {status_color}] вердикт калибровки (2024 г.):[/bold {status_color}]")
-                console.print(f"   Модель: {model_val:.3f}% | Цель: {target_val:.3f}% | Ошибка: {error:.3f}%")
+                console.print(f"\n[bold {status_color}]вердикт калибровки (2024 г.):[/bold {status_color}]")
+                console.print(f"   модель: {model_val:.3f}% | цель: {target_val:.3f}% | ошибка: {error:.3f}%")
 
-            console.print(f"\n[dim] Полная статистика по годам (с CI 95%): yearly_median_1950_2125.csv[/dim]")
+            console.print("\n[dim]полная статистика по годам (с ci 95%): yearly_median_1950_2125.csv[/dim]")
 
-    # =========================================================================
-    # ИТОГОВЫЙ ОТЧЕТ
-    # =========================================================================
+    # итоговый отчет
     total_time = time.time() - start_time
     minutes = int(total_time // 60)
     seconds = total_time % 60
     avg_time_per_run = total_time / model_params.num_runs if model_params.num_runs > 0 else 0
 
-
     if all_results:
         output_dir = os.getcwd()
-        console.print(f"\n [bold white]Статистика ансамбля ({model_params.num_runs} прогонов):[/bold white]")
-        console.print(f"   • База данных: [dim]{output_dir}/[/dim][cyan]monte_carlo_all_runs.csv[/cyan]")
-        console.print(f"   • Сводка ДИ:   [dim]{output_dir}/[/dim][cyan]monte_carlo_summary.csv[/cyan]")
-        console.print(f"   • Калибровка:  [dim]{output_dir}/[/dim][cyan]yearly_median_1950_2125.csv[/cyan]")
+        console.print("\nстатистика ансамбля:")
+        console.print(f"   • база данных: [dim]{output_dir}/[/dim][cyan]monte_carlo_all_runs.csv[/cyan]")
+        console.print(f"   • сводка ди:   [dim]{output_dir}/[/dim][cyan]monte_carlo_summary.csv[/cyan]")
+        console.print(f"   • калибровка:  [dim]{output_dir}/[/dim][cyan]yearly_median_1950_2125.csv[/cyan]")
 
-    console.print(f"\n [bold white]Эффективность системы:[/bold white]")
-    console.print(f"   ⚡ Общее время: {minutes} мин {seconds:.1f} сек")
-    console.print(f"   ⚡ Скорость: {avg_time_per_run:.2f} сек / 1 прогон (симуляция 1950-2125)")
+    console.print("\nэффективность системы:]")
+    console.print(f"   общее время: {minutes} мин {seconds:.1f} сек")
+    console.print(f"   скорость: {avg_time_per_run:.2f} сек / 1 прогон (симуляция 1950-2125)")
 
 
 def compare_scenarios(file1, file2, output_dir="comparison_results",
                       name1="S1", name2="S2", bifurcation_year=2010):
-    """
-    Сравнивает два сценария и строит графики.
-
-    Parameters:
-    -----------
-    file1, file2 : str
-        Пути к CSV файлам
-    output_dir : str
-        Папка для сохранения результатов
-    name1, name2 : str
-        Названия сценариев для легенды
-    bifurcation_year : int
-        Год начала интервенции (точка бифуркации)
-    """
-
-
-    # 2. Информация о времени модификации файлов
+    # информация о времени модификации файлов
     mtime1 = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(file1)))
     mtime2 = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(file2)))
-    console.print(f" {os.path.basename(file1)}: {mtime1}", style="dim")
-    console.print(f" {os.path.basename(file2)}: {mtime2}", style="dim")
+    console.print(f"{os.path.basename(file1)}: {mtime1}", style="dim")
+    console.print(f"{os.path.basename(file2)}: {mtime2}", style="dim")
 
-    # 3. Полная очистка папки перед созданием новых графиков
+    # полная очистка папки перед созданием новых графиков
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 4. Загрузка данных (свежее чтение)
+    # загрузка данных (свежее чтение)
     df1 = pd.read_csv(file1)
     df2 = pd.read_csv(file2)
 
-    # 5. Определяем доступные метрики
+    # определяем доступные метрики
     available_metrics = []
 
     base_metrics = [
@@ -763,9 +691,9 @@ def compare_scenarios(file1, file2, output_dir="comparison_results",
             available_metrics.append((metric, get_metric_label(metric)))
 
     if not available_metrics:
-        print(" Нет доступных метрик для построения графиков!")
-        print(f"   Доступные колонки в df1: {df1.columns.tolist()[:10]}...")
-        print(f"   Доступные колонки в df2: {df2.columns.tolist()[:10]}...")
+        print("нет доступных метрик для построения графиков!")
+        print(f"   доступные колонки в df1: {df1.columns.tolist()[:10]}...")
+        print(f"   доступные колонки в df2: {df2.columns.tolist()[:10]}...")
         return
 
     plt.style.use('seaborn-v0_8-whitegrid')
@@ -776,7 +704,7 @@ def compare_scenarios(file1, file2, output_dir="comparison_results",
 
         window = 10 if 'm694v' in metric_key else 5
 
-        # Цвета для сценариев
+        # цвета для сценариев
         scenarios = [
             (df1, '#888888', '--', name1),
             (df2, '#1f77b4', '-', name2)
@@ -784,7 +712,7 @@ def compare_scenarios(file1, file2, output_dir="comparison_results",
 
         for df, color, ls, name in scenarios:
             if median_col in df.columns and not df[median_col].isna().all():
-                # Убираем NaN перед rolling
+                # убираем NaN перед rolling
                 clean_data = df[['year', median_col]].dropna()
                 if len(clean_data) > window:
                     smooth_median = clean_data[median_col].rolling(window=window, center=True).mean()
@@ -803,25 +731,25 @@ def compare_scenarios(file1, file2, output_dir="comparison_results",
                             plt.fill_between(clean_data['year'], smooth_low, smooth_high,
                                              color=color, alpha=0.15)
 
-        # Оформление
+        # оформление
         plt.legend(frameon=True, loc='best', fontsize=10)
-        plt.title(f"{label} (скользящее среднее {window} лет)\nПрогноз до 2125 г.", fontsize=14, pad=20)
-        plt.xlabel("Год", fontsize=12)
+        plt.title(f"{label} (скользящее среднее {window} лет)\nпрогноз до 2125 г.", fontsize=14, pad=20)
+        plt.xlabel("год", fontsize=12)
         plt.ylabel(label, fontsize=12)
         plt.grid(True, alpha=0.3)
 
-        # Вертикальная линия для точки бифуркации
+        # вертикальная линия для точки бифуркации
         plt.axvline(x=bifurcation_year, color='red', linestyle=':', alpha=0.7,
-                    label=f'Начало интервенции ({bifurcation_year})')
+                    label=f'начало интервенции ({bifurcation_year})')
 
         plt.xlim(1950, 2125)
 
         filename = f"{output_dir}/comparison_{metric_key}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
-        console.print(f" График сохранен: {filename}", style="green")
+        console.print(f"график сохранен: {filename}", style="green")
 
-    # --- РАСЧЕТ ЭФФЕКТИВНОСТИ ---
+    # расчет эффективности
     last_year = min(df1['year'].max(), df2['year'].max())
     analysis_window = 5
 
@@ -834,76 +762,58 @@ def compare_scenarios(file1, file2, output_dir="comparison_results",
             prev1 = prev1_data.mean()
             prev2 = prev2_data.mean()
 
-            console.print(f"\n Анализ эффективности (Среднее за {analysis_window} лет):")
-            console.print(f"• Превалентность {name1}: [bold]{prev1:.3f}%[/bold]")
-            console.print(f"• Превалентность {name2}: [bold]{prev2:.3f}%[/bold]")
+            console.print(f"\nанализ эффективности (среднее за {analysis_window} лет):")
+            console.print(f"• превалентность {name1}: [bold]{prev1:.3f}%[/bold]")
+            console.print(f"• превалентность {name2}: [bold]{prev2:.3f}%[/bold]")
 
             if prev1 > 0:
                 reduction = ((prev1 - prev2) / prev1 * 100)
-                console.print(f"• [green]Снижение заболеваемости:[/green] [bold]{reduction:.1f}%[/bold]")
+                console.print(f"• снижение заболеваемости: [bold]{reduction:.1f}%[/bold]")
         else:
-            console.print(f" Недостаточно данных для расчета эффективности", style="yellow")
+            console.print("недостаточно данных для расчета эффективности", style="yellow")
 
-    # Проверяем предотвращенные случаи
+    # проверяем предотвращенные случаи
     prevented_col = 'prevented_births_total_median'
     if prevented_col in df2.columns:
         prevented_val = df2[df2['year'] == last_year][prevented_col].values
         if len(prevented_val) > 0 and not pd.isna(prevented_val[0]):
-            console.print(f"• [green]Предотвращено случаев:[/green] [bold]{prevented_val[0]:.1f}[/bold]")
+            console.print(f"• предотвращено случаев: [bold]{prevented_val[0]:.1f}[/bold]")
     else:
-        print(f" Метрика {prevented_col} не найдена в данных")
+        print(f"метрика {prevented_col} не найдена в данных")
 
 
 def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_all_scenarios"):
-    """
-    Сравнивает все три сценария на одном графике.
-
-    Parameters:
-    -----------
-    scenario_files_dict : dict
-        Словарь вида {'S1': 'path/to/scenario1.csv', 'S2': 'path/to/scenario2.csv', 'S3': 'path/to/scenario3.csv'}
-    output_dir : str
-        Папка для сохранения результатов
-    """
-    import matplotlib.pyplot as plt
-
-    # Создаем папку для результатов
+    # создаем папку для результатов
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Цвета и стили для сценариев
+    # цвета и стили для сценариев
     scenario_styles = {
-        'S1': {'color': '#888888', 'linestyle': '--', 'linewidth': 2.0, 'label': 'S1: Status Quo (без вмешательства)'},
-        'S2': {'color': '#1f77b4', 'linestyle': '-', 'linewidth': 2.5, 'label': 'S2: Скрининг (с 2010 г.)'},
-        'S3': {'color': '#2ca02c', 'linestyle': '-', 'linewidth': 2.5, 'label': 'S3: Скрининг + PGT (с 2018 г.)'}
+        'S1': {'color': '#888888', 'linestyle': '--', 'linewidth': 2.0, 'label': 'S1: status quo (без вмешательства)'},
+        'S2': {'color': '#1f77b4', 'linestyle': '-', 'linewidth': 2.5, 'label': 'S2: скрининг (с 2010 г.)'},
+        'S3': {'color': '#2ca02c', 'linestyle': '-', 'linewidth': 2.5, 'label': 'S3: скрининг + pgt (с 2018 г.)'}
     }
 
-    # =========================================================================
-    # 1. МЕТРИКИ, КОТОРЫЕ БЫЛИ (доля среди больных)
-    # =========================================================================
+    # метрики, которые были (доля среди больных)
     metrics_among_affected = [
-        ('m694v_homo_in_affected_pct', 'Доля гомозигот M694V среди больных (%)', 0, 30),
-        ('compound_in_affected_pct', 'Доля компаунд-гетерозигот среди больных (%)', 0, 80),
-        ('hetero_in_affected_pct', 'Доля простых гетерозигот среди больных (%)', 0, 60),
-        ('other_homo_in_affected_pct', 'Доля других гомозигот среди больных (%)', 0, 10)
+        ('m694v_homo_in_affected_pct', 'доля гомозигот m694v среди больных (%)', 0, 30),
+        ('compound_in_affected_pct', 'доля компаунд-гетерозигот среди больных (%)', 0, 80),
+        ('hetero_in_affected_pct', 'доля простых гетерозигот среди больных (%)', 0, 60),
+        ('other_homo_in_affected_pct', 'доля других гомозигот среди больных (%)', 0, 10)
     ]
 
-    # =========================================================================
-    # 2. НОВЫЕ МЕТРИКИ - АБСОЛЮТНЫЕ КОЛИЧЕСТВА И ДОЛИ В ПОПУЛЯЦИИ
-    # =========================================================================
+    # новые метрики - абсолютные количества и доли в популяции
     new_metrics = [
-        ('m694v_homo_absolute', 'Абсолютное количество гомозигот M694V во всей популяции (чел.)', 0, None),
-        ('m694v_homo_prevalence_pct', 'Доля гомозигот M694V от общего населения (%)', 0, 1.5),
-        ('total_affected_absolute', 'Абсолютное количество больных FMF (чел.)', 0, None),
-        ('total_carriers_absolute', 'Абсолютное количество носителей FMF (чел.)', 0, None),
+        ('m694v_homo_absolute', 'абсолютное количество гомозигот m694v во всей популяции (чел.)', 0, None),
+        ('m694v_homo_prevalence_pct', 'доля гомозигот m694v от общего населения (%)', 0, 1.5),
+        ('total_affected_absolute', 'абсолютное количество больных fmf (чел.)', 0, None),
+        ('total_carriers_absolute', 'абсолютное количество носителей fmf (чел.)', 0, None),
     ]
 
     plt.style.use('seaborn-v0_8-whitegrid')
 
-    # =========================================================================
-    # ГРАФИКИ ДЛЯ МЕТРИК СРЕДИ БОЛЬНЫХ (как было)
-    # =========================================================================
+    # графики для метрик среди больных
     for metric_key, metric_label, y_min, y_max in metrics_among_affected:
         plt.figure(figsize=(14, 8))
 
@@ -912,7 +822,7 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
 
         for scenario_name, file_path in scenario_files_dict.items():
             if not os.path.exists(file_path):
-                console.print(f" Файл не найден: {file_path}", style="yellow")
+                console.print(f"файл не найден: {file_path}", style="yellow")
                 continue
 
             df = pd.read_csv(file_path)
@@ -937,16 +847,16 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
                              linewidth=style['linewidth'], label=style['label'])
 
         if not has_data:
-            console.print(f" Нет данных для метрики {metric_key}", style="yellow")
+            console.print(f"нет данных для метрики {metric_key}", style="yellow")
             plt.close()
             continue
 
-        plt.axvline(x=2010, color='#1f77b4', linestyle=':', alpha=0.5, linewidth=1.5, label='Начало скрининга (2010)')
-        plt.axvline(x=2018, color='#2ca02c', linestyle=':', alpha=0.5, linewidth=1.5, label='Начало PGT (2018)')
+        plt.axvline(x=2010, color='#1f77b4', linestyle=':', alpha=0.5, linewidth=1.5, label='начало скрининга (2010)')
+        plt.axvline(x=2018, color='#2ca02c', linestyle=':', alpha=0.5, linewidth=1.5, label='начало pgt (2018)')
 
         plt.legend(frameon=True, loc='best', fontsize=10)
-        plt.title(f"{metric_label}\nСравнение трех сценариев (1950-2125)", fontsize=14, pad=20)
-        plt.xlabel("Год", fontsize=12)
+        plt.title(f"{metric_label}\nсравнение трех сценариев (1950-2125)", fontsize=14, pad=20)
+        plt.xlabel("год", fontsize=12)
         plt.ylabel(metric_label, fontsize=12)
         plt.grid(True, alpha=0.3)
         plt.xlim(1950, 2125)
@@ -959,11 +869,9 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
         filename = f"{output_dir}/all_scenarios_{metric_key}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
-        console.print(f" График сохранен: {filename}", style="green")
+        console.print(f"график сохранен: {filename}", style="green")
 
-    # =========================================================================
-    # НОВЫЕ ГРАФИКИ: АБСОЛЮТНЫЕ КОЛИЧЕСТВА ГОМОЗИГОТ
-    # =========================================================================
+    # новые графики: абсолютные количества гомозигот
     for metric_key, metric_label, y_min, y_max in new_metrics:
         plt.figure(figsize=(14, 8))
 
@@ -976,13 +884,11 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
 
             df = pd.read_csv(file_path)
             if df.empty or median_col not in df.columns:
-                # Пробуем создать метрику на лету для absolute значений
+                # пробуем создать метрику на лету для absolute значений
                 if metric_key == 'm694v_homo_absolute':
-                    # Пытаемся вычислить из prevalence и population
+                    # пытаемся вычислить из prevalence и population
                     prev_col = 'm694v_homo_in_affected_pct_median'
-                    pop_col = 'total_population_median'
-                    if prev_col in df.columns and pop_col in df.columns and 'total_affected_median' in df.columns:
-                        # Создаем вычисляемую колонку
+                    if prev_col in df.columns and 'total_affected_median' in df.columns:
                         affected = df['total_affected_median']
                         pct_homo = df[prev_col] / 100
                         df[median_col] = affected * pct_homo
@@ -1030,7 +936,7 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
                              color=style['color'], linestyle=style['linestyle'],
                              linewidth=style['linewidth'], label=style['label'])
 
-                # Добавляем доверительные интервалы для S3
+                # добавляем доверительные интервалы для s3
                 if scenario_name == 'S3' and 'pct' not in metric_key:
                     ci_low = f"{metric_key}_ci_low"
                     ci_high = f"{metric_key}_ci_high"
@@ -1042,16 +948,16 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
                                              color=style['color'], alpha=0.15)
 
         if not has_data:
-            console.print(f" Нет данных для метрики {metric_key}", style="yellow")
+            console.print(f"нет данных для метрики {metric_key}", style="yellow")
             plt.close()
             continue
 
-        plt.axvline(x=2010, color='#1f77b4', linestyle=':', alpha=0.5, linewidth=1.5, label='Начало скрининга (2010)')
-        plt.axvline(x=2018, color='#2ca02c', linestyle=':', alpha=0.5, linewidth=1.5, label='Начало PGT (2018)')
+        plt.axvline(x=2010, color='#1f77b4', linestyle=':', alpha=0.5, linewidth=1.5, label='начало скрининга (2010)')
+        plt.axvline(x=2018, color='#2ca02c', linestyle=':', alpha=0.5, linewidth=1.5, label='начало pgt (2018)')
 
         plt.legend(frameon=True, loc='best', fontsize=10)
-        plt.title(f"{metric_label}\nСравнение трех сценариев (1950-2125)", fontsize=14, pad=20)
-        plt.xlabel("Год", fontsize=12)
+        plt.title(f"{metric_label}\nсравнение трех сценариев (1950-2125)", fontsize=14, pad=20)
+        plt.xlabel("год", fontsize=12)
         plt.ylabel(metric_label, fontsize=12)
         plt.grid(True, alpha=0.3)
         plt.xlim(1950, 2125)
@@ -1065,20 +971,13 @@ def compare_all_scenarios_together(scenario_files_dict, output_dir="comparison_a
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
 
-
-    # =========================================================================
-    # СПЕЦИАЛЬНЫЙ ГРАФИК: СРАВНЕНИЕ АБСОЛЮТНЫХ КОЛИЧЕСТВ M694V ГОМОЗИГОТ
-    # =========================================================================
+    # специальный график: сравнение абсолютных количеств m694v гомозигот
     plot_m694v_homo_comparison(scenario_files_dict, output_dir)
 
-    # =========================================================================
-    # ПРЕВАЛЕНТНОСТЬ С ЗОНАМИ (как было)
-    # =========================================================================
+    # превалентность с зонами
     plot_prevalence_with_interventions(scenario_files_dict, output_dir)
 
-    # =========================================================================
-    # ПРЕДОТВРАЩЕННЫЕ СЛУЧАИ (как было)
-    # =========================================================================
+    # предотвращенные случаи
     plot_prevented_cases_comparison(scenario_files_dict, output_dir)
 
 
@@ -1274,31 +1173,31 @@ if __name__ == "__main__":
     total_start = time.time()
     root_dir = os.getcwd()
 
-    # --- СЦЕНАРИЙ 1 ---
-    console.print(Panel("ЗАПУСК СЦЕНАРИЯ 1: STATUS QUO (БАЗОВЫЙ)\nПериод: 1950 - 2125 гг."))
+    # сценарий 1
+    console.print(Panel("запуск сценария 1: status quo (базовый)\nпериод: 1950 - 2125 гг."))
     path_s1 = os.path.join(root_dir, "scenario_1")
     os.makedirs(path_s1, exist_ok=True)
     os.chdir(path_s1)
     run_model(ModelParams.scenario_1())
     os.chdir(root_dir)
 
-    # --- СЦЕНАРИЙ 2 ---
-    console.print(Panel("ЗАПУСК СЦЕНАРИЯ 2: MODERNIZATION (СКРИНИНГ)\nТочка бифуркации: 2010 г."))
+    # сценарий 2
+    console.print(Panel("запуск сценария 2: modernization (скрининг)\nточка бифуркации: 2010 г."))
     path_s2 = os.path.join(root_dir, "scenario_2")
     os.makedirs(path_s2, exist_ok=True)
     os.chdir(path_s2)
     run_model(ModelParams.scenario_2())
     os.chdir(root_dir)
 
-    # --- СЦЕНАРИЙ 3 ---
-    console.print(Panel("ЗАПУСК СЦЕНАРИЯ 3: СНИЖЕНИЕ АССОРТАТИВНОСТИ + МАССОВЫЙ СКРИНИНГ + ПГД\nТочка бифуркации: 2018 г."))
+    # сценарий 3
+    console.print(Panel("запуск сценария 3: снижение ассортативности + массовый скрининг + пгд\nточка бифуркации: 2018 г."))
     path_s3 = os.path.join(root_dir, "scenario_3")
     os.makedirs(path_s3, exist_ok=True)
     os.chdir(path_s3)
     run_model(ModelParams.scenario_3())
     os.chdir(root_dir)
 
-    console.print("\n Сравнение сценариев на одном графике")
+    console.print("\nсравнение сценариев на одном графике")
 
     scenario_files = {
         'S1': "scenario_1/yearly_median_1950_2125.csv",
@@ -1311,41 +1210,41 @@ if __name__ == "__main__":
         output_dir="comparison_all_scenarios"
     )
 
-    # Дополнительный график предотвращенных случаев
+    # дополнительный график предотвращенных случаев
     plot_prevented_cases_comparison(scenario_files, "comparison_all_scenarios")
 
-    # --- СРАВНЕНИЕ СЦЕНАРИЕВ ---
-    console.print("\nСравнение сценариев")
+    # сравнение сценариев
+    console.print("\nсравнение сценариев")
 
-    # Сравнение Сценария 1 и 2 (бифуркация 2010)
+    # сравнение сценария 1 и 2 (бифуркация 2010)
     compare_scenarios(
         file1="scenario_1/yearly_median_1950_2125.csv",
         file2="scenario_2/yearly_median_1950_2125.csv",
         output_dir="comparison_results_sc1_sc2",
-        name1="S1: Status Quo",
-        name2="S2: Скрининг (2010)",
+        name1="S1: status quo",
+        name2="S2: скрининг (2010)",
         bifurcation_year=2010
     )
 
-    # Сравнение Сценария 1 и 3 (бифуркация 2018)
+    # сравнение сценария 1 и 3 (бифуркация 2018)
     compare_scenarios(
         file1="scenario_1/yearly_median_1950_2125.csv",
         file2="scenario_3/yearly_median_1950_2125.csv",
         output_dir="comparison_results_sc1_sc3",
-        name1="S1: Status Quo",
-        name2="S3: Снижение ассортативности + ПГД (2018)",
+        name1="S1: status quo",
+        name2="S3: снижение ассортативности + пгд (2018)",
         bifurcation_year=2018
     )
 
-    # Сравнение Сценария 2 и 3 (сравнение эффективности)
+    # сравнение сценария 2 и 3 (сравнение эффективности)
     compare_scenarios(
         file1="scenario_2/yearly_median_1950_2125.csv",
         file2="scenario_3/yearly_median_1950_2125.csv",
         output_dir="comparison_results_sc2_sc3",
-        name1="S2: Скрининг (2010)",
-        name2="S3: Снижение ассортативности + ПГД (2018)",
+        name1="S2: скрининг (2010)",
+        name2="S3: снижение ассортативности + пгд (2018)",
         bifurcation_year=2018
     )
 
     duration = (time.time() - total_start) / 60
-    console.print(f"\n Полный цикл исследования завершен за  {duration:.1f} минут")
+    console.print(f"\n полный цикл исследования завершен за {duration:.1f} минут")
