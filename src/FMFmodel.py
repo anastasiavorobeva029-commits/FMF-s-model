@@ -1173,31 +1173,31 @@ if __name__ == "__main__":
     total_start = time.time()
     root_dir = os.getcwd()
 
-    # сценарий 1
-    console.print(Panel("запуск сценария 1: status quo (базовый)\nпериод: 1950 - 2125 гг."))
+    # --- СЦЕНАРИЙ 1 ---
+    console.print(Panel("ЗАПУСК СЦЕНАРИЯ 1: STATUS QUO (БАЗОВЫЙ)\nПериод: 1950 - 2125 гг."))
     path_s1 = os.path.join(root_dir, "scenario_1")
     os.makedirs(path_s1, exist_ok=True)
     os.chdir(path_s1)
     run_model(ModelParams.scenario_1())
     os.chdir(root_dir)
 
-    # сценарий 2
-    console.print(Panel("запуск сценария 2: modernization (скрининг)\nточка бифуркации: 2010 г."))
+    # --- СЦЕНАРИЙ 2 ---
+    console.print(Panel("ЗАПУСК СЦЕНАРИЯ 2: MODERNIZATION (СКРИНИНГ)\nТочка бифуркации: 2010 г."))
     path_s2 = os.path.join(root_dir, "scenario_2")
     os.makedirs(path_s2, exist_ok=True)
     os.chdir(path_s2)
     run_model(ModelParams.scenario_2())
     os.chdir(root_dir)
 
-    # сценарий 3
-    console.print(Panel("запуск сценария 3: снижение ассортативности + массовый скрининг + пгд\nточка бифуркации: 2018 г."))
+    # --- СЦЕНАРИЙ 3 ---
+    console.print(Panel("ЗАПУСК СЦЕНАРИЯ 3: СНИЖЕНИЕ АССОРТАТИВНОСТИ + МАССОВЫЙ СКРИНИНГ + ПГД\nТочка бифуркации: 2018 г."))
     path_s3 = os.path.join(root_dir, "scenario_3")
     os.makedirs(path_s3, exist_ok=True)
     os.chdir(path_s3)
     run_model(ModelParams.scenario_3())
     os.chdir(root_dir)
 
-    console.print("\nсравнение сценариев на одном графике")
+    console.print("\n Сравнение сценариев на одном графике")
 
     scenario_files = {
         'S1': "scenario_1/yearly_median_1950_2125.csv",
@@ -1210,41 +1210,41 @@ if __name__ == "__main__":
         output_dir="comparison_all_scenarios"
     )
 
-    # дополнительный график предотвращенных случаев
+    # Дополнительный график предотвращенных случаев
     plot_prevented_cases_comparison(scenario_files, "comparison_all_scenarios")
 
-    # сравнение сценариев
-    console.print("\nсравнение сценариев")
+    # --- СРАВНЕНИЕ СЦЕНАРИЕВ ---
+    console.print("\nСравнение сценариев")
 
-    # сравнение сценария 1 и 2 (бифуркация 2010)
+    # Сравнение Сценария 1 и 2 (бифуркация 2010)
     compare_scenarios(
         file1="scenario_1/yearly_median_1950_2125.csv",
         file2="scenario_2/yearly_median_1950_2125.csv",
         output_dir="comparison_results_sc1_sc2",
-        name1="S1: status quo",
-        name2="S2: скрининг (2010)",
+        name1="S1: Status Quo",
+        name2="S2: Скрининг (2010)",
         bifurcation_year=2010
     )
 
-    # сравнение сценария 1 и 3 (бифуркация 2018)
+    # Сравнение Сценария 1 и 3 (бифуркация 2018)
     compare_scenarios(
         file1="scenario_1/yearly_median_1950_2125.csv",
         file2="scenario_3/yearly_median_1950_2125.csv",
         output_dir="comparison_results_sc1_sc3",
-        name1="S1: status quo",
-        name2="S3: снижение ассортативности + пгд (2018)",
+        name1="S1: Status Quo",
+        name2="S3: Снижение ассортативности + ПГД (2018)",
         bifurcation_year=2018
     )
 
-    # сравнение сценария 2 и 3 (сравнение эффективности)
+    # Сравнение Сценария 2 и 3 (сравнение эффективности)
     compare_scenarios(
         file1="scenario_2/yearly_median_1950_2125.csv",
         file2="scenario_3/yearly_median_1950_2125.csv",
         output_dir="comparison_results_sc2_sc3",
-        name1="S2: скрининг (2010)",
-        name2="S3: снижение ассортативности + пгд (2018)",
+        name1="S2: Скрининг (2010)",
+        name2="S3: Снижение ассортативности + ПГД (2018)",
         bifurcation_year=2018
     )
 
     duration = (time.time() - total_start) / 60
-    console.print(f"\n полный цикл исследования завершен за {duration:.1f} минут")
+    console.print(f"\n Полный цикл исследования завершен за  {duration:.1f} минут")
