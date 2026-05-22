@@ -1,12 +1,12 @@
 import random
 from collections import defaultdict, Counter
 from dataclasses import dataclass
-from math import sqrt
+
 from typing import Dict, Any
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-from scipy import stats
+
 
 
 from Agent import Agent
@@ -1778,7 +1778,7 @@ class GenerationSimulation:
             ci = 1.96 * se * 100
 
             diff = abs(current_pct - target_val)
-            status = "✅ OK" if diff < 4 else "⚠️ ADJ" if diff < 8 else "❌ FIX"
+            status = "OK" if diff < 4 else "ADJ" if diff < 8 else "FIX"
 
             print(f"{m_type:<25} | {current_pct:>6.2f}% ±{ci:>3.1f} | {target_val:>6.2f}% | {status:>8}")
 
@@ -2078,7 +2078,7 @@ class GenerationSimulation:
             'age_15_49_pct': (np.sum((ages > 14) & (ages <= 49)) / total * 100) if total > 0 else 0,
             'age_50_plus_pct': (np.sum(ages > 49) / total * 100) if total > 0 else 0,
 
-            # ========== НОВЫЕ ПОЛЯ ==========
+
             'm694v_homo_absolute': int(m694v_homo_absolute),
             'm694v_homo_prevalence_pct': m694v_homo_prevalence_pct,
             'total_carriers_absolute': int(total_carriers_absolute),
@@ -2259,7 +2259,7 @@ class GenerationSimulation:
             expected_affected_total = expected_from_natural + expected_from_pgt
 
             actual_affected = a_count
-            prevented_cases = max(0, expected_affected_total - actual_affected)
+            prevented_cases = max(0, round(expected_affected_total) - actual_affected)
 
             print(f"\n    ЭФФЕКТИВНОСТЬ ПРЕДОТВРАЩЕНИЯ ЗАБОЛЕВАЕМОСТИ:")
             print(f"      Ожидалось больных (естеств. роды, 25%):     {expected_from_natural:.1f}")
@@ -2293,7 +2293,7 @@ class GenerationSimulation:
                 dec_actual = sum(1 for c in all_high_risk_children
                                  if (c.birth_year // 10) * 10 == dec
                                  and c.mefv_allele_1 != 'N' and c.mefv_allele_2 != 'N')
-                dec_prevented = max(0, dec_expected - dec_actual)
+                dec_prevented = max(0, round(dec_expected) - dec_actual)
 
                 print(f"   {dec}-{dec + 9:<8} | {dec_pgt:<14} | {share:>20.1f}% | {dec_prevented:<20.0f}")
         else:
