@@ -9,7 +9,7 @@ from GenerationSimulation import GenerationSimulation
 from ModelParams import ModelParams
 
 _MAX_CACHE_SIZE = 128
-_CACHE_VERSION = "v3"  # Увеличивайте при изменении логики симуляции
+_CACHE_VERSION = "v3"
 
 
 def run_single_simulation_optimized(run_id: Union[str, int],
@@ -22,12 +22,7 @@ def run_single_simulation_optimized(run_id: Union[str, int],
                                     verbose: bool = False,
                                     use_cache: bool = True,
                                     force_recompute: bool = False) -> List[Dict[str, Any]]:
-    """
-    Запускает одну симуляцию с возможностью кэширования.
 
-    Args:
-        force_recompute: Если True - игнорирует кэш и выполняет свежий расчет
-    """
     # 1. Уникальный сид для каждого потока/прогона
     if isinstance(run_id, int):
         seed_val = run_id
@@ -72,7 +67,7 @@ def run_single_simulation_optimized(run_id: Union[str, int],
         entry['cache_version'] = _CACHE_VERSION
         entry['timestamp'] = time.time()
 
-    # 4. Сохранение в кэш (только если не force_recompute)
+    # 4. Сохранение в кэш
     if use_cache and cache_key and not force_recompute:
         with _CACHE_LOCK:
             # Ограничиваем размер кэша
@@ -92,7 +87,7 @@ def get_cache_key(params: ModelParams, birth_rate_df, death_rate_df, run_id=None
     """Генерирует уникальный ключ для кэша с учетом версии"""
     scenario_kind = params.__class__.__name__
 
-    # Берем только основные параметры (исключаем изменяемые во время выполнения)
+    # Берем только основные параметры
     p_dict = vars(params).copy()
     # Удаляем потенциально проблемные поля
     p_dict.pop('_instance', None)
@@ -100,7 +95,7 @@ def get_cache_key(params: ModelParams, birth_rate_df, death_rate_df, run_id=None
     param_str = f"{scenario_kind}_{_CACHE_VERSION}_"
     param_str += str(sorted(p_dict.items()))
 
-    # Хэш данных (только если датафреймы не изменились)
+    # Хэш данных
     try:
         birth_hash = pd.util.hash_pandas_object(birth_rate_df).sum()
         death_hash = pd.util.hash_pandas_object(death_rate_df).sum()
@@ -123,7 +118,7 @@ def clear_simulation_cache(verbose: bool = True):
         cache_size = len(_SIMULATION_CACHE)
         _SIMULATION_CACHE.clear()
         if verbose:
-            print(f"🧹 Очищен кэш симуляций ({cache_size} записей)")
+            print(f" Очищен кэш симуляций ({cache_size} записей)")
 
 
 def get_cache_stats() -> Dict[str, Any]:
