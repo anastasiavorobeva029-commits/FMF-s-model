@@ -44,9 +44,7 @@ class SensitivityAnalysis:
 
     def run_one_factor_at_a_time(self, param_ranges, num_runs_per_scenario=3,
                                  max_workers=None, use_caching=True):
-        """
-        OFAT (One Factor At Time) анализ - оптимизированная версия
-        """
+
         scenarios = []
 
         # Базовый сценарий
@@ -99,26 +97,23 @@ class SensitivityAnalysis:
                                    total=len(all_scenario_params),
                                    desc="OFAT прогоны"):
                     params_data = future_to_params[future]
-                    try:
-                        yearly_results = future.result(timeout=120)  # 🔴 Получаем СПИСОК!
 
-                        if yearly_results and isinstance(yearly_results, list):
-                            for year_result in yearly_results:
-                                if year_result and year_result.get('status') == 'success':
-                                    year_result['scenario'] = params_data['scenario_name']
-                                    year_result['run'] = params_data['run']
-                                    year_result[f'param_{params_data["param_name"]}'] = params_data['param_value']
-                                    results.append(year_result)
-                        elif yearly_results and yearly_results.get('status') == 'success':
-                            # Для обратной совместимости
-                            yearly_results['scenario'] = params_data['scenario_name']
-                            yearly_results['run'] = params_data['run']
-                            yearly_results[f'param_{params_data["param_name"]}'] = params_data['param_value']
-                            results.append(yearly_results)
+                    yearly_results = future.result(timeout=120)
 
-                    except Exception as e:
-                        print(f"Ошибка в сценарии {params_data['scenario_name']}: {e}")
-                        continue
+                    if yearly_results and isinstance(yearly_results, list):
+                        for year_result in yearly_results:
+                            if year_result and year_result.get('status') == 'success':
+                                year_result['scenario'] = params_data['scenario_name']
+                                year_result['run'] = params_data['run']
+                                year_result[f'param_{params_data["param_name"]}'] = params_data['param_value']
+                                results.append(year_result)
+                    elif yearly_results and yearly_results.get('status') == 'success':
+                        # Для обратной совместимости
+                        yearly_results['scenario'] = params_data['scenario_name']
+                        yearly_results['run'] = params_data['run']
+                        yearly_results[f'param_{params_data["param_name"]}'] = params_data['param_value']
+                        results.append(yearly_results)
+
 
         return results
 
