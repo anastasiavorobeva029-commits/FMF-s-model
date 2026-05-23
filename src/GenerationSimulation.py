@@ -376,7 +376,7 @@ class GenerationSimulation:
         for year in range(1950, 2126):
             self.year = year
 
-            # ✅ Вариант Б: Обнуляем накопленную генетическую статистику Менделя
+            # Обнуляем накопленную генетическую статистику Менделя
             # ровно в год старта анализируемого периода симуляции
             if self.year == self.simulation_start_year:
                 self.inheritance_stats.combo_children_genotypes.clear()
@@ -447,7 +447,7 @@ class GenerationSimulation:
                 diagnosed=diagnosed_count
             )
 
-            # 4. Собираем ВСЮ статистику за год
+
             year_result = self.collect_all_yearly_stats(run_id)
             yearly_results.append(year_result)
 
