@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
-from typing import Dict
-
+from typing import Dict, List, Optional, Tuple, cast
+from matplotlib.axes import Axes
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -16,6 +16,21 @@ class SensitivityAnalysis:
     """
     Класс для проведения анализа чувствительности агент-ориентированной модели FMF
     Оптимизированная версия
+
+    Parameters
+    ----------
+    base_params : Dict
+        Базовые параметры модели
+    birth_rate_df : pd.DataFrame
+        Данные по рождаемости
+    death_rate_df : pd.DataFrame
+        Данные по смертности
+    tfr_df : pd.DataFrame
+        Данные по коэффициенту рождаемости
+    age_structure_df : pd.DataFrame
+        Структура населения по возрастам
+    fertility_factors_df : pd.DataFrame
+        Факторы фертильности
     """
 
     def __init__(self, base_params: Dict, birth_rate_df, death_rate_df, tfr_df,
@@ -31,22 +46,40 @@ class SensitivityAnalysis:
         self._simulation_cache = {}
         self._baseline_cache = None
 
-        # Ключевые метрики
+        # Ключевые метрики (унифицированные названия)
         self.key_metrics = [
-            'prevalence_pct',
+            'prevalence_total_pct',
             'm694v_homo_in_affected_pct',
             'compound_in_affected_pct',
             'hetero_in_affected_pct',
-            'final_population',
+            'total_population',
             'avg_model_birth_rate',
             'avg_model_death_rate',
         ]
 
-    def run_one_factor_at_a_time(self, param_ranges, num_runs_per_scenario=3,
-                                 max_workers=None, use_caching=True):
+    def run_one_factor_at_a_time(self, param_ranges: Dict[str, List[float]],
+                                 num_runs_per_scenario: int = 3,
+                                 max_workers: Optional[int] = None,
+                                 use_caching: bool = True) -> List[Dict]:
+        """
+        Одномерный анализ чувствительности (OFAT)
 
-        scenarios = []
+        Parameters
+        ----------
+        param_ranges : Dict[str, List[float]]
+            Словарь с диапазонами значений для каждого параметра
+        num_runs_per_scenario : int
+            Количество прогонов для каждого сценария
+        max_workers : Optional[int]
+            Максимальное количество параллельных потоков
+        use_caching : bool
+            Использовать ли кэширование результатов
 
+        Returns
+        -------
+        List[Dict]
+            Список результатов симуляций
+        """
         # Базовый сценарий
         if use_caching and self._baseline_cache is not None:
             base_result = self._baseline_cache
@@ -79,45 +112,58 @@ class SensitivityAnalysis:
         # Параллельный запуск
         results = base_result.copy() if base_result else []
 
-        if all_scenario_params:
-            if max_workers is None:
-                max_workers = min(32, len(all_scenario_params))
+        if not all_scenario_params:
+            return results
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_params = {
-                    executor.submit(
-                        self._run_single_simulation_wrapper,
-                        params_data['params'],
-                        f"{params_data['scenario_name']}_{params_data['run']}"
-                    ): params_data
-                    for params_data in all_scenario_params
-                }
+        if max_workers is None:
+            max_workers = min(32, len(all_scenario_params))
 
-                for future in tqdm(as_completed(future_to_params),
-                                   total=len(all_scenario_params),
-                                   desc="OFAT прогоны"):
-                    params_data = future_to_params[future]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_params = {
+                executor.submit(
+                    self._run_single_simulation_wrapper,
+                    params_data['params'],
+                    f"{params_data['scenario_name']}_{params_data['run']}"
+                ): params_data
+                for params_data in all_scenario_params
+            }
 
+            for future in tqdm(as_completed(future_to_params),
+                               total=len(all_scenario_params),
+                               desc="OFAT прогоны"):
+                params_data = future_to_params[future]
+
+                try:
                     yearly_results = future.result(timeout=120)
 
-                    if yearly_results and isinstance(yearly_results, list):
+                    if yearly_results is None:
+                        continue
+
+                    # Обработка списка результатов
+                    if isinstance(yearly_results, list):
                         for year_result in yearly_results:
                             if year_result and year_result.get('status') == 'success':
-                                year_result['scenario'] = params_data['scenario_name']
-                                year_result['run'] = params_data['run']
-                                year_result[f'param_{params_data["param_name"]}'] = params_data['param_value']
-                                results.append(year_result)
-                    elif yearly_results and yearly_results.get('status') == 'success':
-                        # Для обратной совместимости
-                        yearly_results['scenario'] = params_data['scenario_name']
-                        yearly_results['run'] = params_data['run']
-                        yearly_results[f'param_{params_data["param_name"]}'] = params_data['param_value']
-                        results.append(yearly_results)
+                                result_copy = year_result.copy()
+                                result_copy['scenario'] = params_data['scenario_name']
+                                result_copy['run'] = params_data['run']
+                                result_copy[f'param_{params_data["param_name"]}'] = params_data['param_value']
+                                results.append(result_copy)
 
+                    # Обработка словаря
+                    elif isinstance(yearly_results, dict) and yearly_results.get('status') == 'success':
+                        result_copy = yearly_results.copy()
+                        result_copy['scenario'] = params_data['scenario_name']
+                        result_copy['run'] = params_data['run']
+                        result_copy[f'param_{params_data["param_name"]}'] = params_data['param_value']
+                        results.append(result_copy)
+
+                except Exception as e:
+                    print(f"Ошибка при выполнении {params_data['scenario_name']}: {e}")
+                    continue
 
         return results
 
-    def _run_single_simulation_wrapper(self, params: Dict, run_id):
+    def _run_single_simulation_wrapper(self, params: Dict, run_id: str) -> Optional[Dict]:
         """Обертка для запуска симуляции с кэшированием"""
         sim_params = self.base_params.copy()
         sim_params.update(params)
@@ -146,7 +192,7 @@ class SensitivityAnalysis:
 
         return yearly_results
 
-    def _run_multiple_scenarios(self, params, num_runs, scenario_name):
+    def _run_multiple_scenarios(self, params: Dict, num_runs: int, scenario_name: str) -> List[Dict]:
         """Запускает несколько прогонов для одного сценария"""
         results = []
         sim_params = self.base_params.copy()
@@ -165,33 +211,66 @@ class SensitivityAnalysis:
         )
 
         for run in range(num_runs):
-            yearly_results = run_func(run_id=f"{scenario_name}_{run}")  # 🔴 Теперь получаем СПИСОК!
+            yearly_results = run_func(run_id=f"{scenario_name}_{run}")
 
-            # Обрабатываем каждый год отдельно
-            if yearly_results and isinstance(yearly_results, list):
+            # Пропускаем None результаты
+            if yearly_results is None:
+                continue
+
+            # Обработка списка результатов (по годам)
+            if isinstance(yearly_results, list):
                 for year_result in yearly_results:
                     if year_result and year_result.get('status') == 'success':
-                        year_result['scenario'] = scenario_name
-                        year_result['run'] = run
+                        # Создаем КОПИЮ словаря, чтобы не изменять оригинал
+                        result_copy = year_result.copy()
+                        result_copy['scenario'] = scenario_name
+                        result_copy['run'] = run
 
                         for param_name, param_value in params.items():
-                            year_result[f'param_{param_name}'] = param_value
+                            result_copy[f'param_{param_name}'] = param_value
 
-                        results.append(year_result)
-            elif yearly_results and yearly_results.get('status') == 'success':
-                # Для обратной совместимости (если вдруг вернулся словарь)
-                yearly_results['scenario'] = scenario_name
-                yearly_results['run'] = run
+                        results.append(result_copy)
+
+            # Обработка словаря (один результат) - для обратной совместимости
+            elif isinstance(yearly_results, dict) and yearly_results.get('status') == 'success':
+                # Создаем КОПИЮ словаря
+                result_copy = yearly_results.copy()
+                result_copy['scenario'] = scenario_name
+                result_copy['run'] = run
+
                 for param_name, param_value in params.items():
-                    yearly_results[f'param_{param_name}'] = param_value
-                results.append(yearly_results)
+                    result_copy[f'param_{param_name}'] = param_value
+
+                results.append(result_copy)
+
+            # Логирование неожиданного формата
+            else:
+                print(
+                    f"Предупреждение: Неожиданный формат результата для {scenario_name}_{run}: {type(yearly_results)}")
 
         return results
 
-    def calculate_sensitivity_indices(self, results_df, metrics=None):
+    def calculate_sensitivity_indices(self, results_df: pd.DataFrame,
+                                      metrics: Optional[List[str]] = None) -> pd.DataFrame:
         """
         Рассчитывает индексы чувствительности - векторизованная версия
+
+        Parameters
+        ----------
+        results_df : pd.DataFrame
+            DataFrame с результатами симуляций
+        metrics : Optional[List[str]]
+            Список метрик для анализа
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame с индексами чувствительности
         """
+        if results_df.empty:
+            print("DataFrame результатов пуст")
+            return pd.DataFrame()
+
         if metrics is None:
             metrics = self.key_metrics
 
@@ -253,8 +332,27 @@ class SensitivityAnalysis:
 
         return pd.DataFrame(sensitivity_indices)
 
-    def plot_tornado_diagram(self, sensitivity_df, metric, top_n=10, figsize=(10, 8)):
-        """Строит торнадо-диаграмму"""
+    def plot_tornado_diagram(self, sensitivity_df: pd.DataFrame, metric: str,
+                             top_n: int = 10, figsize: Tuple[int, int] = (10, 8)) -> Optional[plt.Figure]:
+        """
+        Строит торнадо-диаграмму
+
+        Parameters
+        ----------
+        sensitivity_df : pd.DataFrame
+            DataFrame с индексами чувствительности
+        metric : str
+            Метрика для построения диаграммы
+        top_n : int
+            Количество отображаемых параметров
+        figsize : Tuple[int, int]
+            Размер фигуры
+
+        Returns
+        -------
+        Optional[plt.Figure]
+            Объект фигуры или None при ошибке
+        """
         metric_df = sensitivity_df[sensitivity_df['metric'] == metric]
 
         if metric_df.empty:
@@ -285,72 +383,155 @@ class SensitivityAnalysis:
         plt.tight_layout()
         return fig
 
-    def plot_parameter_response(self, results_df, parameter, metrics=None, figsize=(12, 8)):
-        """Строит графики зависимости метрик от параметра"""
+    def plot_parameter_response(self, results_df: pd.DataFrame, parameter: str,
+                                metrics: Optional[List[str]] = None,
+                                figsize: Tuple[int, int] = (12, 8)) -> Optional[plt.Figure]:
+        """
+        Строит графики зависимости метрик от параметра
+
+        Parameters
+        ----------
+        results_df : pd.DataFrame
+            DataFrame с результатами симуляций
+        parameter : str
+            Имя параметра для анализа
+        metrics : Optional[List[str]]
+            Список метрик для построения
+        figsize : Tuple[int, int]
+            Размер фигуры
+
+        Returns
+        -------
+        Optional[plt.Figure]
+            Объект фигуры или None при ошибке
+        """
         if metrics is None:
             metrics = self.key_metrics[:4]
 
         param_col = f'param_{parameter}'
         if param_col not in results_df.columns:
-            print(f"Параметр {parameter} не найден")
+            print(f"Параметр {parameter} не найден в колонках: {results_df.columns.tolist()}")
             return None
 
-        param_data = results_df[results_df[param_col].notna()]
+        param_data = results_df[results_df[param_col].notna()].copy()
+
+        # Конвертация в числовой тип
+        try:
+            param_data[param_col] = pd.to_numeric(param_data[param_col])
+        except (ValueError, TypeError):
+            # Оставляем как есть для строковых параметров
+            pass
 
         if param_data.empty:
+            print(f"Нет данных для параметра {parameter}")
             return None
 
-        n_metrics = len(metrics)
+        metrics_found = [m for m in metrics if m in param_data.columns]
+        if not metrics_found:
+            print(f"Ни одна из метрик {metrics} не найдена в данных")
+            return None
+
+        n_metrics = len(metrics_found)
         n_cols = min(2, n_metrics)
         n_rows = (n_metrics + n_cols - 1) // n_cols
 
         fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+
+        # Обработка случая с одним графиком
         if n_metrics == 1:
             axes = np.array([axes])
-        axes = axes.flatten()
+        axes_flat = axes.flatten()
 
-        # Предварительная группировка
-        grouped_data = {}
-        for metric in metrics:
-            if metric in param_data.columns:
-                grouped = (param_data.groupby(param_col)[metric]
-                           .agg(['mean', 'std', 'count'])
-                           .reset_index())
-                grouped_data[metric] = grouped
+        for i, metric in enumerate(metrics_found):
+            ax = cast(Axes, axes_flat[i])
 
-        for i, metric in enumerate(metrics):
-            if i >= len(axes):
-                break
+            grouped = (param_data.groupby(param_col, sort=True)[metric]
+                       .agg(['mean', 'std', 'count'])
+                       .reset_index())
 
-            ax = axes[i]
+            # Сортировка для числовых параметров
+            try:
+                grouped = grouped.sort_values(by=param_col)
+            except:
+                pass
 
-            if metric in grouped_data:
-                grouped = grouped_data[metric]
-                ci = 1.96 * grouped['std'] / np.sqrt(grouped['count'])
+            # Расчет доверительных интервалов
+            ci = np.zeros(len(grouped))
+            mask = grouped['count'] > 1
+            ci[mask] = 1.96 * grouped.loc[mask, 'std'] / np.sqrt(grouped.loc[mask, 'count'])
 
-                ax.errorbar(grouped[param_col], grouped['mean'],
-                            yerr=ci, marker='o', capsize=5,
-                            capthick=1, elinewidth=1)
+            x_values = grouped[param_col].to_numpy()
+            y_values = grouped['mean'].to_numpy()
 
-                ax.set_xlabel(parameter, fontsize=11)
-                ax.set_ylabel(metric, fontsize=11)
-                ax.set_title(f'Зависимость {metric} от {parameter}', fontsize=12)
-                ax.grid(True, alpha=0.3)
+            # Проверка на числовой тип
+            is_numeric = pd.api.types.is_numeric_dtype(grouped[param_col])
 
-        for j in range(i + 1, len(axes)):
-            axes[j].set_visible(False)
+            if is_numeric:
+                ax.errorbar(x_values, y_values, yerr=ci,
+                            marker='o', capsize=5, capthick=1, elinewidth=1,
+                            linestyle='-', linewidth=1.5)
+            else:
+                x_indices = list(range(len(x_values)))
+                ax.errorbar(x_indices, y_values, yerr=ci,
+                            marker='o', capsize=5, capthick=1, elinewidth=1,
+                            linestyle='-', linewidth=1.5)
+                ax.set_xticks(x_indices)
+                ax.set_xticklabels(x_values, rotation=45, ha='right')
+
+            ax.set_xlabel(parameter, fontsize=11)
+            y_label = metric.replace('_pct', ' (%)').replace('_', ' ').title()
+            ax.set_ylabel(y_label, fontsize=11)
+            ax.set_title(f'Зависимость {y_label} от {parameter}', fontsize=12)
+            ax.grid(True, alpha=0.3)
+
+            # Добавление baseline
+            if 'scenario' in results_df.columns:
+                baseline_mask = results_df['scenario'] == 'baseline'
+                if baseline_mask.any() and metric in results_df.columns:
+                    baseline_value = results_df.loc[baseline_mask, metric].mean()
+                    if pd.notna(baseline_value):
+                        ax.axhline(y=baseline_value, color='red', linestyle='--',
+                                   alpha=0.5, label=f'Baseline: {baseline_value:.2f}')
+                        ax.legend(fontsize=9)
+
+        # Скрытие неиспользуемых подграфиков
+        for j in range(len(metrics_found), len(axes_flat)):
+            cast(Axes, axes_flat[j]).set_visible(False)
 
         plt.tight_layout()
         return fig
 
-    def calculate_global_sensitivity(self, param_distributions, num_samples=100,
-                                     num_runs_per_sample=2, max_workers=None):
-        """Глобальный анализ чувствительности методом Монте-Карло"""
+    def calculate_global_sensitivity(self, param_distributions: Dict,
+                                     num_samples: int = 100,
+                                     num_runs_per_sample: int = 2,
+                                     max_workers: Optional[int] = None,
+                                     random_seed: int = 42) -> pd.DataFrame:
+        """
+        Глобальный анализ чувствительности методом Монте-Карло
+
+        Parameters
+        ----------
+        param_distributions : Dict
+            Словарь с распределениями параметров
+        num_samples : int
+            Количество семплов
+        num_runs_per_sample : int
+            Количество прогонов на семпл
+        max_workers : Optional[int]
+            Максимальное количество параллельных потоков
+        random_seed : int
+            Seed для генератора случайных чисел
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame с результатами глобального анализа
+        """
         results = []
 
         # Генерация выборок
         samples = {}
-        rng = np.random.RandomState(42)
+        rng = np.random.RandomState(random_seed)
 
         for param, dist_info in param_distributions.items():
             if dist_info['dist'] == 'uniform':
@@ -407,13 +588,35 @@ class SensitivityAnalysis:
 
         return pd.DataFrame(results)
 
-    def analyze_parameter_interactions(self, global_results, param_pairs, metric):
-        """Анализирует взаимодействия между парами параметров"""
+    def analyze_parameter_interactions(self, global_results: pd.DataFrame,
+                                       param_pairs: List[Tuple[str, str]],
+                                       metric: str) -> Optional[plt.Figure]:
+        """
+        Анализирует взаимодействия между парами параметров
+
+        Parameters
+        ----------
+        global_results : pd.DataFrame
+            DataFrame с результатами глобального анализа
+        param_pairs : List[Tuple[str, str]]
+            Список пар параметров для анализа
+        metric : str
+            Метрика для анализа
+
+        Returns
+        -------
+        Optional[plt.Figure]
+            Объект фигуры или None при ошибке
+        """
         if global_results.empty or metric not in global_results.columns:
             print(f"Нет данных для метрики {metric}")
             return None
 
         n_pairs = len(param_pairs)
+        if n_pairs == 0:
+            print("Нет пар параметров для анализа")
+            return None
+
         fig, axes = plt.subplots(1, n_pairs, figsize=(6 * n_pairs, 5))
         if n_pairs == 1:
             axes = [axes]
@@ -459,9 +662,124 @@ class SensitivityAnalysis:
         plt.tight_layout()
         return fig
 
-    def clear_cache(self):
+    def save_results(self, results_df: pd.DataFrame, output_dir: str = "sensitivity_results") -> None:
+        """
+        Сохраняет результаты анализа чувствительности
+
+        Parameters
+        ----------
+        results_df : pd.DataFrame
+            DataFrame с результатами для сохранения
+        output_dir : str
+            Директория для сохранения результатов
+        """
+        if results_df.empty:
+            print("Нет результатов для сохранения")
+            return
+
+        import os
+        import json
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Сохраняем DataFrame
+        results_df.to_csv(f"{output_dir}/sensitivity_results.csv", index=False)
+
+        # Сохраняем метаданные
+        metadata = {
+            'base_params': self.base_params,
+            'key_metrics': self.key_metrics,
+            'num_results': len(results_df),
+            'columns': list(results_df.columns)
+        }
+
+        with open(f"{output_dir}/sensitivity_metadata.json", 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, default=str)
+
+        print(f"Результаты сохранены в {output_dir}/")
+
+    @classmethod
+    def load_results(cls, results_dir: str = "sensitivity_results") -> Tuple[pd.DataFrame, Dict]:
+        """
+        Загружает ранее сохраненные результаты
+
+        Parameters
+        ----------
+        results_dir : str
+            Директория с сохраненными результатами
+
+        Returns
+        -------
+        Tuple[pd.DataFrame, Dict]
+            DataFrame с результатами и словарь с метаданными
+        """
+        import json
+        import os
+
+        results_df = pd.read_csv(f"{results_dir}/sensitivity_results.csv")
+
+        with open(f"{results_dir}/sensitivity_metadata.json", 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+
+        print(f"Загружено {len(results_df)} результатов")
+        print(f"Базовые параметры: {metadata['base_params']}")
+
+        return results_df, metadata
+
+    def generate_summary_report(self, sensitivity_df: pd.DataFrame,
+                                results_df: pd.DataFrame,
+                                output_dir: str = "sensitivity_results") -> None:
+        """
+        Генерирует сводный отчет по анализу чувствительности
+
+        Parameters
+        ----------
+        sensitivity_df : pd.DataFrame
+            DataFrame с индексами чувствительности
+        results_df : pd.DataFrame
+            DataFrame с результатами симуляций
+        output_dir : str
+            Директория для сохранения отчета
+        """
+        import os
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        with open(f"{output_dir}/sensitivity_report.txt", 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("ОТЧЕТ ПО АНАЛИЗУ ЧУВСТВИТЕЛЬНОСТИ\n")
+            f.write("=" * 80 + "\n\n")
+
+            # Основная статистика
+            f.write(f"Базовых параметров: {len(self.base_params)}\n")
+            f.write(f"Всего результатов: {len(results_df)}\n")
+            if 'scenario' in results_df.columns:
+                f.write(f"Уникальных сценариев: {results_df['scenario'].nunique()}\n")
+            f.write("\n")
+
+            # Самые чувствительные параметры для каждой метрики
+            f.write("НАИБОЛЕЕ ЧУВСТВИТЕЛЬНЫЕ ПАРАМЕТРЫ\n")
+            f.write("-" * 80 + "\n")
+
+            for metric in self.key_metrics:
+                metric_df = sensitivity_df[sensitivity_df['metric'] == metric]
+                if not metric_df.empty:
+                    top_params = metric_df.nlargest(3, 'sensitivity_index')[['parameter', 'sensitivity_index']]
+                    f.write(f"\n{metric}:\n")
+                    for _, row in top_params.iterrows():
+                        f.write(f"  - {row['parameter']}: {row['sensitivity_index']:.3f}\n")
+
+            f.write("\n" + "=" * 80 + "\n")
+            f.write(f"Отчет сгенерирован автоматически\n")
+
+        print(f"Отчет сохранен в {output_dir}/sensitivity_report.txt")
+
+    def clear_cache(self) -> None:
         """Очищает кэш"""
         self._simulation_cache.clear()
         self._baseline_cache = None
-        from caches import _SIMULATION_CACHE
-        _SIMULATION_CACHE.clear()
+        try:
+            from caches import _SIMULATION_CACHE
+            _SIMULATION_CACHE.clear()
+        except ImportError:
+            pass  # caches module not available
