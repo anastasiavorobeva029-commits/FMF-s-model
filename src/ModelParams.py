@@ -19,7 +19,7 @@ class ModelParams:
     pgt_start_year: int = 2018
     num_runs: int = 2
     max_age_limit: int = 85
-    initial_population_size: int = 5_000
+    initial_population_size: int = 1_000
     diagnosis_slope: float = 0.012350
     diagnosis_intercept: float = -24.52535
     diagnosis_min_prob: float = 0.05
@@ -82,41 +82,45 @@ class ModelParams:
     @staticmethod
     def from_dictionary(d: Dict):
         """Создает ModelParams из словаря (для анализа чувствительности)"""
-        # Базовые значения (из scenario_1)
-        params = ModelParams.scenario_1().to_dictionary()
+        # Начинаем со сценария 1
+        base = ModelParams.scenario_1()
 
-        # Обновляем переданными значениями
-        for key, value in d.items():
-            if key in params or hasattr(ModelParams, key):
-                params[key] = value
+        # Собираем параметры для конструктора
+        params_dict = {
+            'ethnic_assortativity': d.get('ethnic_assortativity', base.ethnic_assortativity),
+            'do_diagnosing': d.get('do_diagnosing', base.do_diagnosing),
+            'use_screening': d.get('use_screening', base.use_screening),
+            'use_pgt': d.get('use_pgt', base.use_pgt),
+            'pgt_efficiency': d.get('pgt_efficiency', base.pgt_efficiency),
+            'screening_coverage': d.get('screening_coverage', base.screening_coverage),
+            'screening_efficiency': d.get('screening_efficiency', base.screening_efficiency),
+            'fertility_recovery': d.get('fertility_recovery', base.fertility_recovery),
+            'ethnic_distribution': d.get('ethnic_distribution', base.ethnic_distribution),
+            'systemic_diagnosis_start_year': d.get('systemic_diagnosis_start_year', base.systemic_diagnosis_start_year),
+            'screening_start_year': d.get('screening_start_year', base.screening_start_year),
+            'pgt_start_year': d.get('pgt_start_year', base.pgt_start_year),
+            'num_runs': d.get('num_runs', base.num_runs),
+            'max_age_limit': d.get('max_age_limit', base.max_age_limit),
+            'initial_population_size': d.get('initial_population_size', base.initial_population_size),
+            'diagnosis_slope': d.get('diagnosis_slope', base.diagnosis_slope),
+            'diagnosis_intercept': d.get('diagnosis_intercept', base.diagnosis_intercept),
+            'diagnosis_min_prob': d.get('diagnosis_min_prob', base.diagnosis_min_prob),
+            'diagnosis_max_prob': d.get('diagnosis_max_prob', base.diagnosis_max_prob),
+            'diagnosis_child_multiplier': d.get('diagnosis_child_multiplier', base.diagnosis_child_multiplier),
+            'diagnosis_adult_multiplier': d.get('diagnosis_adult_multiplier', base.diagnosis_adult_multiplier),
+            'bio_access_pgt_scenario': d.get('bio_access_pgt_scenario', base.bio_access_pgt_scenario),
+            'bio_access_screening_scenario': d.get('bio_access_screening_scenario', base.bio_access_screening_scenario),
+            'bio_access_baseline': d.get('bio_access_baseline', base.bio_access_baseline),
+        }
 
-        # Создаем объект
-        return ModelParams(
-            ethnic_assortativity=params['ethnic_assortativity'],
-            do_diagnosing=params['do_diagnosing'],
-            use_screening=params['use_screening'],
-            use_pgt=params['use_pgt'],
-            pgt_efficiency=params['pgt_efficiency'],
-            screening_coverage=params['screening_coverage'],
-            screening_efficiency=params['screening_efficiency'],
-            fertility_recovery=params['fertility_recovery'],
-            ethnic_distribution=params['ethnic_distribution'],
-            systemic_diagnosis_start_year=params.get('systemic_diagnosis_start_year', 1990),
-            screening_start_year=params.get('screening_start_year', 2010),
-            pgt_start_year=params.get('pgt_start_year', 2018),
-            num_runs=params.get('num_runs', 2),
-            max_age_limit=params.get('max_age_limit', 85),
-            initial_population_size=params.get('initial_population_size', 5000),
-            diagnosis_slope=params.get('diagnosis_slope', 0.012350),
-            diagnosis_intercept=params.get('diagnosis_intercept', -24.52535),
-            diagnosis_min_prob=params.get('diagnosis_min_prob', 0.05),
-            diagnosis_max_prob=params.get('diagnosis_max_prob', 0.98),
-            diagnosis_child_multiplier=params.get('diagnosis_child_multiplier', 1.3),
-            diagnosis_adult_multiplier=params.get('diagnosis_adult_multiplier', 0.8),
-            bio_access_pgt_scenario=params.get('bio_access_pgt_scenario', 0.15),
-            bio_access_screening_scenario=params.get('bio_access_screening_scenario', 0.05),
-            bio_access_baseline=params.get('bio_access_baseline', 0.0)
-        )
+        # Критическая логика: включаем флаги если соответствующие параметры > 0
+        if params_dict['screening_coverage'] > 0.01:
+            params_dict['use_screening'] = True
+
+        if params_dict['pgt_efficiency'] > 0.01:
+            params_dict['use_pgt'] = True
+
+        return ModelParams(**params_dict)
 
     def to_dictionary(self) -> Dict:
         """Преобразует объект в словарь"""

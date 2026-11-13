@@ -8,7 +8,7 @@ import warnings
 from GenerationSimulation import GenerationSimulation
 from ModelParams import ModelParams
 from run_optimized import run_single_simulation_optimized
-from SensitivityAnalysis import SensitivityAnalysis
+from SensetivityAnalysis import SensitivityAnalysis
 import glob
 import shutil
 
@@ -24,15 +24,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
 
+def load_demographic_data(project_root=None):
+    """
+    Загружает демографические данные из корневой директории проекта
+    """
+    if project_root is None:
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
 
-
-def load_demographic_data():
     files = {
-        'birth_rate': '../birth_rate_full_1950_2125.csv',
-        'death_rate': '../death_rate_full_1950_2125.csv',
-        'fertility_rate': '../fertility_rate_full_1950_2125.csv',
-        'age_structure_1950': '../age_structure_1950.csv',
-        'age_fertility_dist': '../age_fertility_dist.csv'
+        'birth_rate': os.path.join(project_root, 'birth_rate_full_1950_2125.csv'),
+        'death_rate': os.path.join(project_root, 'death_rate_full_1950_2125.csv'),
+        'fertility_rate': os.path.join(project_root, 'fertility_rate_full_1950_2125.csv'),
+        'age_structure_1950': os.path.join(project_root, 'age_structure_1950.csv'),
+        'age_fertility_dist': os.path.join(project_root, 'age_fertility_dist.csv')
     }
 
     data = {}
@@ -52,7 +57,7 @@ def load_demographic_data():
             df.columns = [name]
 
         data[name] = df
-        print(f"  ✓ Загружен {filename}: {df.shape}, тип данных: {df[df.columns[0]].dtype}")
+        print(f"  ✓ Загружен {os.path.basename(filename)}: {df.shape}")
 
     return (
         data['birth_rate'],
@@ -61,7 +66,6 @@ def load_demographic_data():
         data['age_structure_1950'],
         data['age_fertility_dist']
     )
-
 
 def print_final_validation_average(all_startup_stats, target_metrics):
     """Валидирует стартовые параметры популяции (1950 г.) по нескольким итерациям."""
@@ -1130,69 +1134,157 @@ def get_metric_label(metric_key):
 
 
 def run_sensitivity_analysis_for_scenario(scenario_name: str, scenario_params: ModelParams,
+                                          project_root: str,
                                           console: Optional[Console] = None):
     """
     Запускает анализ чувствительности для конкретного сценария
-
-    Parameters
-    ----------
-    scenario_name : str
-        Название сценария (scenario_1, scenario_2, scenario_3)
-    scenario_params : ModelParams
-        Параметры сценария
-    console : Optional[Console]
-        Консоль для вывода
     """
     if console is None:
         console = Console()
 
     console.print(Panel(f"АНАЛИЗ ЧУВСТВИТЕЛЬНОСТИ ДЛЯ {scenario_name.upper()}", style="bold yellow"))
 
-    # Загрузка демографических данных
-    data_files = load_demographic_data()
-    birth_rate, death_rate, tfr_data, age_structure, fert_factors = data_files
+    # Проверяем наличие CSV файлов в корневой директории
+    required_files = [
+        'birth_rate_full_1950_2125.csv',
+        'death_rate_full_1950_2125.csv',
+        'fertility_rate_full_1950_2125.csv',
+        'age_structure_1950.csv',
+        'age_fertility_dist.csv'
+    ]
 
-    # Базовые параметры для анализа (текущий сценарий)
+    console.print(f"[dim]Корневая директория проекта: {project_root}[/dim]")
+
+    for file in required_files:
+        file_path = os.path.join(project_root, file)
+        if os.path.exists(file_path):
+            console.print(f"[dim]  ✓ Найден: {file}[/dim]")
+        else:
+            console.print(f"[red]  ✗ Не найден: {file}[/red]")
+
+    # Загрузка демографических данных
+    console.print("\n[bold]Загрузка демографических данных...[/bold]")
+
+    data = {}
+    for name, filename in [
+        ('birth_rate', 'birth_rate_full_1950_2125.csv'),
+        ('death_rate', 'death_rate_full_1950_2125.csv'),
+        ('fertility_rate', 'fertility_rate_full_1950_2125.csv'),
+        ('age_structure_1950', 'age_structure_1950.csv'),
+        ('age_fertility_dist', 'age_fertility_dist.csv')
+    ]:
+        file_path = os.path.join(project_root, filename)
+        console.print(f"[dim]Загрузка: {file_path}[/dim]")
+
+        df = pd.read_csv(file_path, sep=';', skipinitialspace=True, decimal='.')
+
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.'), errors='coerce')
+
+        if name in ['age_structure_1950', 'age_fertility_dist']:
+            df.set_index(df.columns[0], inplace=True)
+            df.index.name = 'Age_Group'
+        else:
+            df.set_index(df.columns[0], inplace=True)
+            df.index.name = 'Year'
+            df.columns = [name]
+
+        data[name] = df
+        console.print(f"[dim]    ✓ Загружен {filename}: {df.shape}[/dim]")
+
+    console.print("[green]✓ Все данные успешно загружены[/green]")
+
+    # Базовые параметры для анализа
     base_params = {
         'ethnic_assortativity': scenario_params.ethnic_assortativity,
+        'do_diagnosing': scenario_params.do_diagnosing,
+        'use_screening': scenario_params.use_screening,
+        'use_pgt': scenario_params.use_pgt,
         'screening_coverage': scenario_params.screening_coverage,
         'screening_efficiency': scenario_params.screening_efficiency,
         'pgt_efficiency': scenario_params.pgt_efficiency,
-        'fertility_recovery': scenario_params.fertility_recovery
+        'fertility_recovery': scenario_params.fertility_recovery,
+        'ethnic_distribution': scenario_params.ethnic_distribution,
+        'systemic_diagnosis_start_year': scenario_params.systemic_diagnosis_start_year,
+        'screening_start_year': scenario_params.screening_start_year,
+        'pgt_start_year': scenario_params.pgt_start_year,
+        'num_runs': scenario_params.num_runs,
+        'max_age_limit': scenario_params.max_age_limit,
+        'initial_population_size': scenario_params.initial_population_size,
+        'diagnosis_slope': scenario_params.diagnosis_slope,
+        'diagnosis_intercept': scenario_params.diagnosis_intercept,
+        'diagnosis_min_prob': scenario_params.diagnosis_min_prob,
+        'diagnosis_max_prob': scenario_params.diagnosis_max_prob,
+        'diagnosis_child_multiplier': scenario_params.diagnosis_child_multiplier,
+        'diagnosis_adult_multiplier': scenario_params.diagnosis_adult_multiplier,
+        'bio_access_pgt_scenario': scenario_params.bio_access_pgt_scenario,
+        'bio_access_screening_scenario': scenario_params.bio_access_screening_scenario,
+        'bio_access_baseline': scenario_params.bio_access_baseline
     }
 
     # Инициализация анализа
     sa = SensitivityAnalysis(
         base_params=base_params,
-        birth_rate_df=birth_rate,
-        death_rate_df=death_rate,
-        tfr_df=tfr_data,
-        age_structure_df=age_structure,
-        fertility_factors_df=fert_factors
+        birth_rate_df=data['birth_rate'],
+        death_rate_df=data['death_rate'],
+        tfr_df=data['fertility_rate'],
+        age_structure_df=data['age_structure_1950'],
+        fertility_factors_df=data['age_fertility_dist']
     )
+    console.print("[green]✓ SensitivityAnalysis инициализирован[/green]")
 
-    # Определяем параметры для анализа и их диапазоны
-    param_ranges = {
-        'ethnic_assortativity': [0.5, 0.7, base_params['ethnic_assortativity'], 0.9, 0.95],
-        'screening_coverage': [0.0, 0.3, base_params['screening_coverage'], 0.7, 0.9],
-        'screening_efficiency': [0.0, 0.3, base_params['screening_efficiency'], 0.7, 0.9],
-        'pgt_efficiency': [0.0, 0.3, base_params['pgt_efficiency'], 0.7, 0.95],
-        'fertility_recovery': [0.5, 0.7, base_params['fertility_recovery'], 0.9, 1.0]
-    }
+    # Определяем параметры для анализа и их диапазоны в зависимости от сценария
+    if scenario_name == "scenario_1":
+        param_ranges = {
+            'ethnic_assortativity': [0.5, 0.7, 0.85, 0.9, 0.95],
+            'screening_coverage': [0.0, 0.3, 0.7, 0.9],
+            'screening_efficiency': [0.0, 0.3, 0.7, 0.9],
+            'pgt_efficiency': [0.0, 0.3, 0.7, 0.95],
+            'fertility_recovery': [0.5, 0.7, 0.9, 1.0]
+        }
+    elif scenario_name == "scenario_2":
+        param_ranges = {
+            'ethnic_assortativity': [0.5, 0.7, 0.75, 0.9, 0.95],
+            'screening_coverage': [0.0, 0.3, 0.6, 0.7, 0.9],
+            'screening_efficiency': [0.0, 0.3, 0.7, 0.9],
+            'pgt_efficiency': [0.0, 0.3, 0.5, 0.7, 0.95],
+            'fertility_recovery': [0.5, 0.7, 0.85, 0.9, 1.0]
+        }
+    else:  # scenario_3
+        param_ranges = {
+            'ethnic_assortativity': [0.5, 0.55, 0.7, 0.9, 0.95],
+            'screening_coverage': [0.0, 0.3, 0.7, 0.8, 0.9],
+            'screening_efficiency': [0.0, 0.3, 0.7, 0.8, 0.9],
+            'pgt_efficiency': [0.0, 0.3, 0.7, 0.85, 0.95],
+            'fertility_recovery': [0.5, 0.7, 0.9, 0.95, 1.0]
+        }
 
     console.print("\n[bold]Параметры для анализа:[/bold]")
     for param, values in param_ranges.items():
         console.print(f"  • {param}: {values}")
 
-    # Создаем директорию для результатов
-    output_dir = f"sensitivity_{scenario_name}"
+    # Создаем директорию для результатов в project_root
+    output_dir = os.path.join(project_root, f"sensitivity_{scenario_name}")
+
+    # Удаляем старую директорию если существует
+    import shutil
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+        console.print(f"[dim]Старая директория {output_dir} удалена[/dim]")
+
     os.makedirs(output_dir, exist_ok=True)
+    console.print(f"[dim]Результаты будут сохранены в: {output_dir}/[/dim]")
 
     # Запуск OFAT анализа
     console.print("\n[bold cyan]Запуск OFAT анализа...[/bold cyan]")
+
+    if hasattr(sa, 'clear_cache'):
+        sa.clear_cache()
+
     results = sa.run_one_factor_at_a_time(
         param_ranges=param_ranges,
-        num_runs_per_scenario=2,  # 2 прогона для скорости (можно увеличить до 3-5)
+        num_runs_per_scenario=2,
         max_workers=4,
         use_caching=True
     )
@@ -1203,10 +1295,11 @@ def run_sensitivity_analysis_for_scenario(scenario_name: str, scenario_params: M
 
     # Преобразуем в DataFrame
     results_df = pd.DataFrame(results)
-    console.print(f"[green]Получено {len(results_df)} результатов[/green]")
+    console.print(f"[green]✓ Получено {len(results_df)} результатов[/green]")
 
     # Сохраняем результаты
     sa.save_results(results_df, output_dir)
+    console.print(f"[green]✓ Результаты сохранены в {output_dir}/[/green]")
 
     # Расчет индексов чувствительности
     console.print("\n[bold cyan]Расчет индексов чувствительности...[/bold cyan]")
@@ -1216,26 +1309,25 @@ def run_sensitivity_analysis_for_scenario(scenario_name: str, scenario_params: M
         console.print("[red]Не удалось рассчитать индексы чувствительности[/red]")
         return results_df, None
 
-    console.print(f"[green]Рассчитано {len(sensitivity_df)} индексов чувствительности[/green]")
+    console.print(f"[green]✓ Рассчитано {len(sensitivity_df)} индексов чувствительности[/green]")
 
     # Сохраняем индексы
-    sensitivity_df.to_csv(f"{output_dir}/sensitivity_indices.csv", index=False)
+    sensitivity_file = os.path.join(output_dir, "sensitivity_indices.csv")
+    sensitivity_df.to_csv(sensitivity_file, index=False)
+    console.print(f"[green]✓ Индексы сохранены в {sensitivity_file}[/green]")
 
-    # Строим торнадо-диаграммы для каждой метрики
+    # Строим торнадо-диаграммы
     console.print("\n[bold cyan]Построение графиков...[/bold cyan]")
+    plots_created = 0
     for metric in sa.key_metrics:
         if metric in results_df.columns:
-            # Торнадо-диаграмма
             fig = sa.plot_tornado_diagram(sensitivity_df, metric, top_n=8)
             if fig:
-                fig.savefig(f"{output_dir}/tornado_{metric}.png", dpi=300, bbox_inches='tight')
+                fig.savefig(os.path.join(output_dir, f"tornado_{metric}.png"), dpi=300, bbox_inches='tight')
                 plt.close(fig)
+                plots_created += 1
 
-            # График зависимости для основного параметра
-            fig = sa.plot_parameter_response(results_df, 'ethnic_assortativity', [metric])
-            if fig:
-                fig.savefig(f"{output_dir}/response_{metric}_assortativity.png", dpi=300, bbox_inches='tight')
-                plt.close(fig)
+    console.print(f"[green]✓ Создано {plots_created} торнадо-диаграмм[/green]")
 
     # Вывод самых чувствительных параметров
     console.print("\n[bold yellow]Самые чувствительные параметры:[/bold yellow]")
@@ -1248,66 +1340,113 @@ def run_sensitivity_analysis_for_scenario(scenario_name: str, scenario_params: M
 
     # Генерация отчета
     sa.generate_summary_report(sensitivity_df, results_df, output_dir)
+    console.print(f"[green]✓ Отчет сгенерирован[/green]")
 
     console.print(f"\n[bold green]✓ Анализ чувствительности для {scenario_name} завершен![/bold green]")
     console.print(f"  Результаты сохранены в папке: {output_dir}/")
 
     return results_df, sensitivity_df
 
-
 if __name__ == "__main__":
     matplotlib.use('Agg')
     console = Console()
     total_start = time.time()
-    root_dir = os.getcwd()
+
+    # Определяем корневую директорию проекта (там где лежат CSV файлы)
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_file_dir)  # поднимаемся из src в thesis
+    console.print(f"[dim]Project root: {project_root}[/dim]")
+
+    # =========================================================
+    # ОЧИСТКА СТАРЫХ РЕЗУЛЬТАТОВ
+    # =========================================================
+    import shutil
+
+    folders_to_clean = [
+        'scenario_1', 'scenario_2', 'scenario_3',
+        'sensitivity_scenario_1', 'sensitivity_scenario_2', 'sensitivity_scenario_3',
+        'comparison_all_scenarios', 'comparison_results_sc1_sc2',
+        'comparison_results_sc1_sc3', 'comparison_results_sc2_sc3'
+    ]
+
+    for folder_name in folders_to_clean:
+        folder_path = os.path.join(project_root, folder_name)
+        if os.path.exists(folder_path):
+            shutil.rmtree(folder_path)
+            console.print(f"[dim]Очищена папка: {folder_name}[/dim]")
+
+    console.print("[green]✓ Старые результаты очищены[/green]\n")
+
+    # Список необходимых CSV файлов
+    required_files = [
+        'birth_rate_full_1950_2125.csv',
+        'death_rate_full_1950_2125.csv',
+        'fertility_rate_full_1950_2125.csv',
+        'age_structure_1950.csv',
+        'age_fertility_dist.csv'
+    ]
+
+
+    def copy_csv_files(dest_dir):
+        """Копирует CSV файлы в директорию сценария"""
+        for csv_file in required_files:
+            src = os.path.join(project_root, csv_file)
+            dst = os.path.join(dest_dir, csv_file)
+            if not os.path.exists(dst) and os.path.exists(src):
+                shutil.copy(src, dst)
+
 
     # СЦЕНАРИЙ 1
     console.print(Panel("ЗАПУСК СЦЕНАРИЯ 1: STATUS QUO (БАЗОВЫЙ)\nПериод: 1950 - 2125 гг."))
-    path_s1 = os.path.join(root_dir, "scenario_1")
+    path_s1 = os.path.join(project_root, "scenario_1")
     os.makedirs(path_s1, exist_ok=True)
+    copy_csv_files(path_s1)
     os.chdir(path_s1)
     run_model(ModelParams.scenario_1(), console=console)
-    os.chdir(root_dir)
+    os.chdir(project_root)
 
     # СЦЕНАРИЙ 2
     console.print(Panel("ЗАПУСК СЦЕНАРИЯ 2: MODERNIZATION (СКРИНИНГ)\nТочка бифуркации: 2010 г."))
-    path_s2 = os.path.join(root_dir, "scenario_2")
+    path_s2 = os.path.join(project_root, "scenario_2")
     os.makedirs(path_s2, exist_ok=True)
+    copy_csv_files(path_s2)
     os.chdir(path_s2)
     run_model(ModelParams.scenario_2(), console=console)
-    os.chdir(root_dir)
+    os.chdir(project_root)
 
     # СЦЕНАРИЙ 3
     console.print(
         Panel("ЗАПУСК СЦЕНАРИЯ 3: СНИЖЕНИЕ АССОРТАТИВНОСТИ + МАССОВЫЙ СКРИНИНГ + ПГД\nТочка бифуркации: 2018 г."))
-    path_s3 = os.path.join(root_dir, "scenario_3")
+    path_s3 = os.path.join(project_root, "scenario_3")
     os.makedirs(path_s3, exist_ok=True)
+    copy_csv_files(path_s3)
     os.chdir(path_s3)
     run_model(ModelParams.scenario_3(), console=console)
-    os.chdir(root_dir)
+    os.chdir(project_root)
 
     console.print("\n Сравнение сценариев на одном графике")
 
     scenario_files = {
-        'S1': "scenario_1/yearly_median_1950_2125.csv",
-        'S2': "scenario_2/yearly_median_1950_2125.csv",
-        'S3': "scenario_3/yearly_median_1950_2125.csv"
+        'S1': os.path.join(project_root, "scenario_1/yearly_median_1950_2125.csv"),
+        'S2': os.path.join(project_root, "scenario_2/yearly_median_1950_2125.csv"),
+        'S3': os.path.join(project_root, "scenario_3/yearly_median_1950_2125.csv")
     }
 
     compare_all_scenarios_together(
         scenario_files_dict=scenario_files,
-        output_dir="comparison_all_scenarios",
+        output_dir=os.path.join(project_root, "comparison_all_scenarios"),
         console=console
     )
 
-    plot_prevented_cases_comparison(scenario_files, "comparison_all_scenarios", console=console)
+    plot_prevented_cases_comparison(scenario_files, os.path.join(project_root, "comparison_all_scenarios"),
+                                    console=console)
 
     console.print("\nСравнение сценариев")
 
     compare_scenarios(
-        file1="scenario_1/yearly_median_1950_2125.csv",
-        file2="scenario_2/yearly_median_1950_2125.csv",
-        output_dir="comparison_results_sc1_sc2",
+        file1=os.path.join(project_root, "scenario_1/yearly_median_1950_2125.csv"),
+        file2=os.path.join(project_root, "scenario_2/yearly_median_1950_2125.csv"),
+        output_dir=os.path.join(project_root, "comparison_results_sc1_sc2"),
         name1="S1: Status Quo",
         name2="S2: Скрининг (2010)",
         bifurcation_year=2010,
@@ -1315,9 +1454,9 @@ if __name__ == "__main__":
     )
 
     compare_scenarios(
-        file1="scenario_1/yearly_median_1950_2125.csv",
-        file2="scenario_3/yearly_median_1950_2125.csv",
-        output_dir="comparison_results_sc1_sc3",
+        file1=os.path.join(project_root, "scenario_1/yearly_median_1950_2125.csv"),
+        file2=os.path.join(project_root, "scenario_3/yearly_median_1950_2125.csv"),
+        output_dir=os.path.join(project_root, "comparison_results_sc1_sc3"),
         name1="S1: Status Quo",
         name2="S3: Снижение ассортативности + ПГД (2018)",
         bifurcation_year=2018,
@@ -1325,9 +1464,9 @@ if __name__ == "__main__":
     )
 
     compare_scenarios(
-        file1="scenario_2/yearly_median_1950_2125.csv",
-        file2="scenario_3/yearly_median_1950_2125.csv",
-        output_dir="comparison_results_sc2_sc3",
+        file1=os.path.join(project_root, "scenario_2/yearly_median_1950_2125.csv"),
+        file2=os.path.join(project_root, "scenario_3/yearly_median_1950_2125.csv"),
+        output_dir=os.path.join(project_root, "comparison_results_sc2_sc3"),
         name1="S2: Скрининг (2010)",
         name2="S3: Снижение ассортативности + ПГД (2018)",
         bifurcation_year=2018,
@@ -1339,14 +1478,14 @@ if __name__ == "__main__":
     # =========================================================
     console.print(Panel("ЗАПУСК АНАЛИЗА ЧУВСТВИТЕЛЬНОСТИ ДЛЯ ВСЕХ СЦЕНАРИЕВ", style="bold magenta"))
 
-    # Для Сценария 1
-    run_sensitivity_analysis_for_scenario("scenario_1", ModelParams.scenario_1(), console=console)
+    # Для Сценария 1 - передаем project_root
+    run_sensitivity_analysis_for_scenario("scenario_1", ModelParams.scenario_1(), project_root, console=console)
 
     # Для Сценария 2
-    run_sensitivity_analysis_for_scenario("scenario_2", ModelParams.scenario_2(), console=console)
+    run_sensitivity_analysis_for_scenario("scenario_2", ModelParams.scenario_2(), project_root, console=console)
 
     # Для Сценария 3
-    run_sensitivity_analysis_for_scenario("scenario_3", ModelParams.scenario_3(), console=console)
+    run_sensitivity_analysis_for_scenario("scenario_3", ModelParams.scenario_3(), project_root, console=console)
 
     # =========================================================
     # ВЫВОД ИТОГОВ

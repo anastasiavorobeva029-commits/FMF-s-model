@@ -168,7 +168,6 @@ class SensitivityAnalysis:
         sim_params = self.base_params.copy()
         sim_params.update(params)
 
-        # Теперь возвращает список, берем только последний год для анализа чувствительности
         yearly_results = run_single_simulation_optimized(
             run_id=run_id,
             params=ModelParams.from_dictionary(sim_params),
@@ -181,16 +180,21 @@ class SensitivityAnalysis:
             use_cache=True
         )
 
-        # Для анализа чувствительности берем только 2024 год
-        if yearly_results and isinstance(yearly_results, list):
-            # Ищем запись за 2024 год
+        if yearly_results is None:
+            return None
+
+        if isinstance(yearly_results, list):
+            # Ищем 2024 год (без проверки status)
             for result in yearly_results:
-                if result.get('year') == 2024 and result.get('status') == 'success':
+                if isinstance(result, dict) and result.get('year') == 2024:
                     return result
-            # Если нет 2024, берем последний
+            # Если 2024 не найден, возвращаем последний год
             return yearly_results[-1] if yearly_results else None
 
-        return yearly_results
+        elif isinstance(yearly_results, dict):
+            return yearly_results
+
+        return None
 
     def _run_multiple_scenarios(self, params: Dict, num_runs: int, scenario_name: str) -> List[Dict]:
         """Запускает несколько прогонов для одного сценария"""
@@ -557,7 +561,7 @@ class SensitivityAnalysis:
 
         # Параллельный запуск
         if max_workers is None:
-            max_workers = min(32, len(all_tasks))
+            max_workers = min(2, len(all_tasks))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_task = {
@@ -662,7 +666,8 @@ class SensitivityAnalysis:
         plt.tight_layout()
         return fig
 
-    def save_results(self, results_df: pd.DataFrame, output_dir: str = "sensitivity_results") -> None:
+    def save_results(self, results_df: pd.DataFrame, output_dir: str = "sensitivity_results",
+                     overwrite: bool = True) -> None:
         """
         Сохраняет результаты анализа чувствительности
 
@@ -672,6 +677,8 @@ class SensitivityAnalysis:
             DataFrame с результатами для сохранения
         output_dir : str
             Директория для сохранения результатов
+        overwrite : bool
+            Перезаписывать ли существующую директорию
         """
         if results_df.empty:
             print("Нет результатов для сохранения")
@@ -679,6 +686,12 @@ class SensitivityAnalysis:
 
         import os
         import json
+        import shutil
+
+        # Если нужно перезаписать и директория существует - удаляем её
+        if overwrite and os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+            print(f"Старая директория {output_dir} удалена")
 
         os.makedirs(output_dir, exist_ok=True)
 
